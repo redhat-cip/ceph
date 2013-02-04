@@ -55,15 +55,16 @@ void inode_backpointer_t::generate_test_instances(list<inode_backpointer_t*>& ls
 
 void inode_backtrace_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(4, 4, bl);
+  ENCODE_START(5, 4, bl);
   ::encode(ino, bl);
   ::encode(ancestors, bl);
+  ::encode(pool, bl);
   ENCODE_FINISH(bl);
 }
 
 void inode_backtrace_t::decode(bufferlist::iterator& bl)
 {
-  DECODE_START_LEGACY_COMPAT_LEN(4, 4, 4, bl);
+  DECODE_START_LEGACY_COMPAT_LEN(5, 4, 4, bl);
   if (struct_v < 3)
     return;  // sorry, the old data was crap
   ::decode(ino, bl);
@@ -77,6 +78,9 @@ void inode_backtrace_t::decode(bufferlist::iterator& bl)
       ancestors.back().decode_old(bl);
     }
   }
+  if (struct_v >= 5) {
+    ::decode(pool, bl);
+  }
   DECODE_FINISH(bl);
 }
 
@@ -89,6 +93,7 @@ void inode_backtrace_t::dump(Formatter *f) const
     p->dump(f);
     f->close_section();
   }
+  f->dump_int("pool", pool);
   f->close_section();
 }
 
@@ -101,5 +106,6 @@ void inode_backtrace_t::generate_test_instances(list<inode_backtrace_t*>& ls)
   ls.back()->ancestors.back().dirino = 123;
   ls.back()->ancestors.back().dname = "bar";
   ls.back()->ancestors.back().version = 456;
+  ls.back()->pool = 0;
 }
 

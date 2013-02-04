@@ -2597,8 +2597,6 @@ void Server::handle_client_open(MDRequest *mdr)
   reply_request(mdr, 0, cur, dn);
 }
 
-
-
 class C_MDS_openc_finish : public Context {
   MDS *mds;
   MDRequest *mdr;
@@ -2628,6 +2626,8 @@ public:
     MClientReply *reply = new MClientReply(mdr->client_request, 0);
     reply->set_extra_bl(mdr->reply_extra_bl);
     mds->server->reply_request(mdr, reply);
+
+    newi->queue_backtrace(mdr->ls, newi->inode.layout.fl_pg_pool);
   }
 };
 
@@ -2740,7 +2740,7 @@ void Server::handle_client_openc(MDRequest *mdr)
   CInode *in = prepare_new_inode(mdr, dn->get_dir(), inodeno_t(req->head.ino),
 				 req->head.args.open.mode | S_IFREG, &layout);
   assert(in);
-  
+
   // it's a file.
   dn->push_projected_linkage(in);
 
@@ -3028,6 +3028,8 @@ public:
   void finish(int r) {
     assert(r == 0);
 
+    int64_t old_pool = in->inode.layout.fl_pg_pool;
+
     // apply
     in->pop_and_dirty_projected_inode(mdr->ls);
     mdr->apply();
@@ -3044,6 +3046,14 @@ public:
 
     if (changed_ranges)
       mds->locker->share_inode_max_size(in);
+
+    // if pool changed, queue a new backtrace and set forward pointer on old
+    if (old_pool != in->inode.layout.fl_pg_pool) {
+      in->queue_backtrace(mdr->ls, in->inode.layout.fl_pg_pool);
+
+      // set forwarding pointer on old backtrace
+      in->queue_backtrace(mdr->ls, old_pool, in->inode.layout.fl_pg_pool);
+    }
   }
 };
 
@@ -3422,6 +3432,7 @@ void Server::handle_client_setlayout(MDRequest *mdr)
   EUpdate *le = new EUpdate(mdlog, "setlayout");
   mdlog->start_entry(le);
   le->metablob.add_client_req(req->get_reqid(), req->get_oldest_client_tid());
+  le->metablob.add_old_pool(cur->inode.layout.fl_pg_pool);
   mdcache->predirty_journal_parents(mdr, &le->metablob, cur, 0, PREDIRTY_PRIMARY, false);
   mdcache->journal_dirty_inode(mdr, &le->metablob, cur);
   
@@ -3650,6 +3661,8 @@ void Server::handle_set_vxattr(MDRequest *mdr, CInode *cur,
     EUpdate *le = new EUpdate(mdlog, "set vxattr layout");
     mdlog->start_entry(le);
     le->metablob.add_client_req(req->get_reqid(), req->get_oldest_client_tid());
+    if (cur->is_file())
+      le->metablob.add_old_pool(cur->inode.layout.fl_pg_pool);
     mdcache->predirty_journal_parents(mdr, &le->metablob, cur, 0, PREDIRTY_PRIMARY, false);
     mdcache->journal_dirty_inode(mdr, &le->metablob, cur);
 
@@ -3910,6 +3923,15 @@ public:
 
     // hit pop
     mds->balancer->hit_inode(mdr->now, newi, META_POP_IWR);
+
+    // store the backtrace on the 'parent' xattr
+    if (newi->inode.is_dir()) {
+      // if its a dir, put it in the metadata pool
+      newi->queue_backtrace(mdr->ls, mds->mdsmap->get_metadata_pool());
+    } else {
+      // if its a file, put it in the data pool for that file
+      newi->queue_backtrace(mdr->ls, newi->inode.layout.fl_pg_pool);
+    }
 
     // reply
     MClientReply *reply = new MClientReply(mdr->client_request, 0);
@@ -5825,7 +5847,29 @@ void Server::_rename_finish(MDRequest *mdr, CDentry *srcdn, CDentry *destdn, CDe
     mds->balancer->hit_inode(mdr->now, destdnl->get_inode(), META_POP_IWR);
 
   // did we import srci?  if so, explicitly ack that import that, before we unlock and reply.
-  
+
+  // backtrace
+  if (destdnl->inode->is_dir()) {
+    // replace previous backtrace on this inode with myself
+    if (!destdnl->inode->backtraces.empty()) {
+      cinode_backtrace_info_t *oldinfo = destdnl->inode->backtraces.back();
+      delete oldinfo;
+    }
+    destdnl->inode->queue_backtrace(mdr->ls, mds->mdsmap->get_metadata_pool());
+
+  } else {
+    // remove all pending backtraces going to the same pool
+    elist<cinode_backtrace_info_t*>::iterator i = destdnl->inode->backtraces.begin();
+    while (!i.end()) {
+      cinode_backtrace_info_t *info = *i;
+      // increment now in case we need to remove
+      ++i;
+      if (info->location == destdnl->inode->inode.layout.fl_pg_pool) {
+	delete info;
+      }
+    }
+    destdnl->inode->queue_backtrace(mdr->ls, destdnl->inode->inode.layout.fl_pg_pool);
+  }
 
   // reply
   MClientReply *reply = new MClientReply(mdr->client_request, 0);
@@ -6198,6 +6242,9 @@ void Server::_rename_prepare(MDRequest *mdr,
     mdcache->project_subtree_rename(oldin, destdn->get_dir(), straydn->get_dir());
   if (srci->is_dir())
     mdcache->project_subtree_rename(srci, srcdn->get_dir(), destdn->get_dir());
+
+  // always update the backtrace
+  metablob->update_backtrace();
 }
 
 
@@ -6304,16 +6351,6 @@ void Server::_rename_apply(MDRequest *mdr, CDentry *srcdn, CDentry *destdn, CDen
     if (destdn->is_auth()) {
       in->pop_and_dirty_projected_inode(mdr->ls);
 
-      if (in->is_dir()) {
-	mdr->ls->renamed_files.push_back(&in->item_renamed_file);
-	if (!in->state_test(CInode::STATE_DIRTYPARENT)) {
-	  in->state_set(CInode::STATE_DIRTYPARENT);
-	  in->get(CInode::PIN_DIRTYPARENT);
-	  dout(10) << "added dir to logsegment renamed_files list " << *in << dendl;
-	} else {
-	  dout(10) << "re-added dir to logsegment renamed_files list " << *in << dendl;
-	}
-      }
     } else {
       // FIXME: fix up snaprealm!
     }

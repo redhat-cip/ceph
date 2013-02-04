@@ -47,6 +47,9 @@ inline ostream& operator<<(ostream& out, const inode_backpointer_t& ib) {
 struct inode_backtrace_t {
   inodeno_t ino;       // my ino
   vector<inode_backpointer_t> ancestors;
+  int64_t pool;
+
+  inode_backtrace_t() : pool(-1) {}
 
   void encode(bufferlist& bl) const;
   void decode(bufferlist::iterator &bl);
@@ -56,7 +59,7 @@ struct inode_backtrace_t {
 WRITE_CLASS_ENCODER(inode_backtrace_t)
 
 inline ostream& operator<<(ostream& out, const inode_backtrace_t& it) {
-  return out << it.ino << ":" << it.ancestors;
+  return out << "(" << it.pool << ")" << it.ino << ":" << it.ancestors;
 }
 
 
