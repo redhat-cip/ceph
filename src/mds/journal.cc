@@ -722,7 +722,7 @@ void EMetaBlob::dirlump::generate_test_instances(list<dirlump*>& ls)
  */
 void EMetaBlob::encode(bufferlist& bl) const
 {
-  ENCODE_START(5, 5, bl);
+  ENCODE_START(6, 5, bl);
   ::encode(lump_order, bl);
   ::encode(lump_map, bl);
   ::encode(roots, bl);
@@ -740,11 +740,13 @@ void EMetaBlob::encode(bufferlist& bl) const
   ::encode(client_reqs, bl);
   ::encode(renamed_dirino, bl);
   ::encode(renamed_dir_frags, bl);
+  ::encode(old_pool, bl);
+  ::encode(update_bt, bl);
   ENCODE_FINISH(bl);
 }
 void EMetaBlob::decode(bufferlist::iterator &bl)
 {
-  DECODE_START_LEGACY_COMPAT_LEN(5, 5, 5, bl);
+  DECODE_START_LEGACY_COMPAT_LEN(6, 5, 5, bl);
   ::decode(lump_order, bl);
   ::decode(lump_map, bl);
   if (struct_v >= 4) {
@@ -781,6 +783,10 @@ void EMetaBlob::decode(bufferlist::iterator &bl)
   if (struct_v >= 3) {
     ::decode(renamed_dirino, bl);
     ::decode(renamed_dir_frags, bl);
+  }
+  if (struct_v >= 6) {
+    ::decode(old_pool, bl);
+    ::decode(update_bt, bl);
   }
   DECODE_FINISH(bl);
 }
