@@ -2228,6 +2228,35 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         break;
       }
 
+    case CEPH_OSD_OP_LIST_SNAPS:
+      {
+        obj_list_snap_response_t resp;
+
+        if (!ssc) {
+            ssc = ctx->obc->ssc = get_snapset_context(soid.oid, soid.get_key(), soid.hash, false);
+        }
+
+        if (ssc) {
+          vector<snapid_t>::const_iterator snap_iter;
+          for (snap_iter = ssc->snapset.snaps.begin();
+                 snap_iter != ssc->snapset.snaps.end(); snap_iter++) {
+  
+            dout(20) << "List snaps id=" << *snap_iter << dendl;
+  
+            assert(*snap_iter != CEPH_NOSNAP);
+            assert(*snap_iter != CEPH_SNAPDIR);
+  
+            resp.entries.push_back(*snap_iter);
+          }
+        }
+
+        resp.encode(osd_op.outdata);
+        result = 0;
+
+        ctx->delta_stats.num_rd++;
+        break;
+      }
+
     case CEPH_OSD_OP_ASSERT_SRC_VERSION:
       {
 	uint64_t ver = op.watch.ver;

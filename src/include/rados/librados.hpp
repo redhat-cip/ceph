@@ -333,6 +333,7 @@ namespace librados
      * @param prval [out] place error code in prval upon completion
      */
     void list_watchers(std::list<obj_watch_t> *out_watchers, int *prval);
+    void list_snaps(std::list<snap_t> *out_snaps, int *prval);
 
   };
 
@@ -506,6 +507,7 @@ namespace librados
     int unwatch(const std::string& o, uint64_t handle);
     int notify(const std::string& o, uint64_t ver, bufferlist& bl);
     int list_watchers(const std::string& o, std::list<obj_watch_t> *out_watchers);
+    int list_snaps(const std::string& o, std::list<snap_t> *out_watchers);
     void set_notify_timeout(uint32_t timeout);
 
     // assert version for next sync operations

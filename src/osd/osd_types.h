@@ -2093,4 +2093,44 @@ struct obj_list_watch_response_t {
 
 WRITE_CLASS_ENCODER(obj_list_watch_response_t)
 
+typedef uint64_t obj_snapid_t;
+
+/**
+ * obj list snaps response format
+ *
+ */
+struct obj_list_snap_response_t {
+  list<obj_snapid_t> entries;  //Same as snapid_t
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(entries, bl);
+    ENCODE_FINISH(bl);
+  }
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(entries, bl);
+    DECODE_FINISH(bl);
+  }
+  void dump(Formatter *f) const {
+    f->open_array_section("entries");
+    for (list<obj_snapid_t>::const_iterator p = entries.begin(); p != entries.end(); ++p) {
+      f->open_object_section("snap");
+      snapid_t sid(*p);
+      f->dump_stream("id") << sid;
+      f->close_section();
+    }
+    f->close_section();
+  }
+  static void generate_test_instances(list<obj_list_snap_response_t*>& o) {
+    o.push_back(new obj_list_snap_response_t);
+    o.push_back(new obj_list_snap_response_t);
+    o.back()->entries.push_back(1);
+    o.back()->entries.push_back(2);
+    o.back()->entries.push_back(4);
+  }
+};
+
+WRITE_CLASS_ENCODER(obj_list_snap_response_t)
+
 #endif
