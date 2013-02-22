@@ -900,45 +900,6 @@ void EMetaBlob::replay(MDS *mds, LogSegment *logseg, MDSlaveUpdate *slaveup)
     if (!in)
       in = new CInode(mds->mdcache, true);
     (*p)->update_inode(mds, in);
-    // store backtrace for allocated inos (create, mkdir, symlink, mknod)
-    if (allocated_ino) {
-      if (in->inode.is_dir()) {
-	in->queue_backtrace(logseg, mds->mdsmap->get_metadata_pool());
-      } else {
-	in->queue_backtrace(logseg, in->inode.layout.fl_pg_pool);
-      }
-    }
-    // handle change of pool with backtrace update
-    if (old_pool != -1 && old_pool != in->inode.layout.fl_pg_pool) {
-      // update backtrace on new data pool
-      in->queue_backtrace(logseg, in->inode.layout.fl_pg_pool);
-
-      // set forwarding pointer on old backtrace
-      in->queue_backtrace(logseg, old_pool, in->inode.layout.fl_pg_pool);
-    }
-    // handle backtrace update if specified (used by rename)
-    if (update_bt) {
-      if (in->is_dir()) {
-	// replace previous backtrace on this inode with myself
-	if (!in->backtraces.empty()) {
-	  cinode_backtrace_info_t *oldinfo = in->backtraces.back();
-	  delete oldinfo;
-	}
-      }
-      in->queue_backtrace(logseg, mds->mdsmap->get_metadata_pool());
-    } else {
-      // remove all pending backtraces going to the same pool
-      elist<cinode_backtrace_info_t*>::iterator i = in->backtraces.begin();
-      while(!i.end()) {
-	cinode_backtrace_info_t *info = *i;
-	// increment now in case we need to remove
-	++i;
-	if (info->location == in->inode.layout.fl_pg_pool) {
-	  delete info;
-	}
-      }
-      in->queue_backtrace(logseg, in->inode.layout.fl_pg_pool);
-    }
 
     if (isnew)
       mds->mdcache->add_inode(in);
@@ -1106,6 +1067,46 @@ void EMetaBlob::replay(MDS *mds, LogSegment *logseg, MDSlaveUpdate *slaveup)
 	}
 	assert(in->first == p->dnfirst ||
 	       (in->is_multiversion() && in->first > p->dnfirst));
+      }
+
+      // store backtrace for allocated inos (create, mkdir, symlink, mknod)
+      if (allocated_ino || used_preallocated_ino) {
+	if (in->inode.is_dir()) {
+	  in->queue_backtrace_update(logseg, mds->mdsmap->get_metadata_pool());
+	} else {
+	  in->queue_backtrace_update(logseg, in->inode.layout.fl_pg_pool);
+	}
+      }
+      // handle change of pool with backtrace update
+      if (old_pool != -1 && old_pool != in->inode.layout.fl_pg_pool) {
+	// update backtrace on new data pool
+	in->queue_backtrace_update(logseg, in->inode.layout.fl_pg_pool);
+
+	// set forwarding pointer on old backtrace
+	in->queue_backtrace_update(logseg, old_pool, in->inode.layout.fl_pg_pool);
+      }
+      // handle backtrace update if specified (used by rename)
+      if (update_bt) {
+	if (in->is_dir()) {
+	  // replace previous backtrace on this inode with myself
+	  if (!in->backtraces.empty()) {
+	    cinode_backtrace_info_t *oldinfo = in->backtraces.back();
+	    delete oldinfo;
+	  }
+	  in->queue_backtrace_update(logseg, mds->mdsmap->get_metadata_pool());
+	} else {
+	  // remove all pending backtraces going to the same pool
+	  elist<cinode_backtrace_info_t*>::iterator i = in->backtraces.begin();
+	  while(!i.end()) {
+	    cinode_backtrace_info_t *info = *i;
+	    // increment now in case we need to remove
+	    ++i;
+	    if (info->location == in->inode.layout.fl_pg_pool) {
+	      delete info;
+	    }
+	  }
+	  in->queue_backtrace_update(logseg, in->inode.layout.fl_pg_pool);
+	}
       }
     }
 
