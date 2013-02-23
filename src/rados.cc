@@ -83,6 +83,7 @@ void usage(ostream& out)
 "   rmsnap <snap-name>               remove snap <snap-name>\n"
 "   rollback <obj-name> <snap-name>  roll back object to snap <snap-name>\n"
 "\n"
+"   listsnaps <obj-name>             list the snapshots of this object\n"
 "   bench <seconds> write|seq|rand [-t concurrent_operations] [--no-cleanup]\n"
 "                                    default is 16 concurrent IOs and 4 MB ops\n"
 "                                    default is to clean up after write benchmark\n"
@@ -2022,6 +2023,31 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     for (i = lw.begin(); i != lw.end(); i++) {
       cout << "watcher=client." << i->watcher_id << " cookie=" << i->cookie << std::endl;
     }
+  } else if (strcmp(nargs[0], "listsnaps") == 0) {
+    if (!pool_name || nargs.size() < 2)
+      usage_exit();
+
+    string oid(nargs[1]);
+    std::list<snap_t> ls;
+
+    ret = io_ctx.list_snaps(oid, &ls);
+    if (ret < 0) {
+      cerr << "error listing snap shots " << pool_name << "/" << oid << ": " << strerror_r(-ret, buf, sizeof(buf)) << std::endl;
+      return 1;
+    }
+    else
+      ret = 0;
+    
+    std::list<snap_t>::iterator i;
+    cout << "Snapshots:";
+    if (ls.empty()) {
+        cout << " none";
+    } else {
+      for (i = ls.begin(); i != ls.end(); i++) {
+        cout << " " << *i;
+      }
+    }
+    cout << std::endl;
   } else {
     cerr << "unrecognized command " << nargs[0] << std::endl;
     usage_exit();
