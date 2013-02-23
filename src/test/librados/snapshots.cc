@@ -325,6 +325,10 @@ TEST(LibRadosSnapshots, SelfManagedSnapRollbackPP) {
   bl1.append(buf, sizeof(buf));
   ASSERT_EQ((int)sizeof(buf), ioctx.write("foo", bl1, sizeof(buf), 0));
 
+  std::list<snap_t> snaps;
+  ASSERT_EQ(0, ioctx.list_snaps("foo", &snaps));
+  ASSERT_EQ(1u, snaps.size());
+
   my_snaps.push_back(-2);
   ASSERT_EQ(0, ioctx.selfmanaged_snap_create(&my_snaps.back()));
   ::std::reverse(my_snaps.begin(), my_snaps.end());
@@ -336,8 +340,10 @@ TEST(LibRadosSnapshots, SelfManagedSnapRollbackPP) {
   bl2.append(buf2, sizeof(buf2));
   ASSERT_EQ((int)sizeof(buf2), ioctx.write("foo", bl2, sizeof(buf2), 0));
 
-  string foo_str("foo");
-  ioctx.selfmanaged_snap_rollback(foo_str, my_snaps[1]);
+  ASSERT_EQ(0, ioctx.list_snaps("foo", &snaps));
+  ASSERT_EQ(2u, snaps.size());
+
+  ioctx.selfmanaged_snap_rollback("foo", my_snaps[1]);
   bufferlist bl3;
   ASSERT_EQ((int)sizeof(buf), ioctx.read("foo", bl3, sizeof(buf), 0));
   ASSERT_EQ(0, memcmp(bl3.c_str(), buf, sizeof(buf)));
