@@ -2038,13 +2038,49 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     else
       ret = 0;
     
-    std::list<snap_t>::iterator i;
-    cout << "Snapshots:";
+    if (!formatter) {
+      cout << "Snapshots:";
+    }
     if (ls.empty()) {
+      if (!formatter)
         cout << " none";
     } else {
-      for (i = ls.begin(); i != ls.end(); i++) {
-        cout << " " << *i;
+      map<snap_t,string> snamemap;
+      vector<snap_t> snaps;
+      io_ctx.snap_list(&snaps);
+      for (vector<snap_t>::iterator i = snaps.begin();
+          i != snaps.end(); i++) {
+        string s;
+        if (io_ctx.snap_get_name(*i, &s) < 0)
+          continue;
+        snamemap.insert(pair<snap_t,string>(*i, s));
+      }
+      if (formatter) {
+        formatter->open_object_section("object");
+        formatter->dump_string("objname", oid);
+        formatter->open_array_section("snaps");
+      }
+      for (std::list<snap_t>::iterator i = ls.begin(); i != ls.end(); i++) {
+        map<snap_t,string>::iterator si;
+        si = snamemap.find(*i);
+        if (formatter) {
+          formatter->open_object_section("snapshot");
+          formatter->dump_int("id", *i);
+          if (si != snamemap.end())
+            formatter->dump_string("name", si->second);
+          formatter->close_section();
+        } else {
+          if (si == snamemap.end())
+            cout << " " << *i;
+          else
+            cout << " " << si->second << "(" << *i << ")";
+        }
+      }
+      if (formatter) {
+        formatter->close_section();
+        formatter->close_section();
+        formatter->flush(cout);
+      } else {
       }
     }
     cout << std::endl;
