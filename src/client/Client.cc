@@ -947,7 +947,7 @@ Inode* Client::insert_trace(MetaRequest *request, int mds)
       Dir *dir = diri->open_dir();
       insert_dentry_inode(dir, dname, &dlease, in, request->sent_stamp, mds, true,
                           ((request->head.op == CEPH_MDS_OP_RENAME) ?
-                                        request->old_dentry : NULL));
+                                        request->old_dentry() : NULL));
     } else {
       Dentry *dn = NULL;
       if (diri->dir && diri->dir->dentries.count(dname)) {
@@ -1001,6 +1001,7 @@ int Client::choose_target_mds(MetaRequest *req)
   bool is_hash = false;
 
   Inode *in = NULL;
+  Dentry *de = NULL;
   Cap *cap = NULL;
 
   if (req->resend_mds >= 0) {
@@ -1013,8 +1014,9 @@ int Client::choose_target_mds(MetaRequest *req)
   if (cct->_conf->client_use_random_mds)
     goto random_mds;
 
-  if (req->inode) {
-    in = req->inode;
+  in = req->inode();
+  de = req->dentry();
+  if (in) {
     ldout(cct, 20) << "choose_target_mds starting with req->inode " << *in << dendl;
     if (req->path.depth()) {
       hash = ceph_str_hash(in->dir_layout.dl_dir_hash,
@@ -1025,17 +1027,17 @@ int Client::choose_target_mds(MetaRequest *req)
 	       << " => " << hash << dendl;
       is_hash = true;
     }
-  } else if (req->dentry) {
-    if (req->dentry->inode) {
-      in = req->dentry->inode;
+  } else if (de) {
+    if (de->inode) {
+      in = de->inode;
       ldout(cct, 20) << "choose_target_mds starting with req->dentry inode " << *in << dendl;
     } else {
-      in = req->dentry->dir->parent_inode;
+      in = de->dir->parent_inode;
       hash = ceph_str_hash(in->dir_layout.dl_dir_hash,
-			   req->dentry->name.data(),
-			   req->dentry->name.length());
+			   de->name.data(),
+			   de->name.length());
       ldout(cct, 20) << "choose_target_mds dentry dir hash is " << (int)in->dir_layout.dl_dir_hash
-	       << " on " << req->dentry->name
+	       << " on " << de->name
 	       << " => " << hash << dendl;
       is_hash = true;
     }
@@ -1330,27 +1332,27 @@ void Client::encode_cap_releases(MetaRequest *req, int mds)
 {
   ldout(cct, 20) << "encode_cap_releases enter (req: "
 		 << req << ", mds: " << mds << ")" << dendl;
-  if (req->inode_drop && req->inode)
-    encode_inode_release(req->inode, req,
+  if (req->inode_drop && req->inode())
+    encode_inode_release(req->inode(), req,
 			 mds, req->inode_drop,
 			 req->inode_unless);
   
-  if (req->old_inode_drop && req->old_inode)
-    encode_inode_release(req->old_inode, req,
+  if (req->old_inode_drop && req->old_inode())
+    encode_inode_release(req->old_inode(), req,
 			 mds, req->old_inode_drop,
 			 req->old_inode_unless);
-  if (req->other_inode_drop && req->other_inode)
-    encode_inode_release(req->other_inode, req,
+  if (req->other_inode_drop && req->other_inode())
+    encode_inode_release(req->other_inode(), req,
 			 mds, req->other_inode_drop,
 			 req->other_inode_unless);
   
-  if (req->dentry_drop && req->dentry)
-    encode_dentry_release(req->dentry, req,
+  if (req->dentry_drop && req->dentry())
+    encode_dentry_release(req->dentry(), req,
 			  mds, req->dentry_drop,
 			  req->dentry_unless);
   
-  if (req->old_dentry_drop && req->old_dentry)
-    encode_dentry_release(req->old_dentry, req,
+  if (req->old_dentry_drop && req->old_dentry())
+    encode_dentry_release(req->old_dentry(), req,
 			  mds, req->old_dentry_drop,
 			  req->old_dentry_unless);
   ldout(cct, 25) << "encode_cap_releases exit (req: "
@@ -1450,7 +1452,7 @@ void Client::send_request(MetaRequest *request, int mds)
   ldout(cct, 10) << "send_request rebuilding request " << request->get_tid()
 	   << " for mds." << mds << dendl;
   MClientRequest *r = build_client_request(request);
-  if (request->dentry)
+  if (request->dentry())
     r->set_dentry_wanted();
   if (request->got_unsafe)
     r->set_replayed_op();
@@ -1465,8 +1467,9 @@ void Client::send_request(MetaRequest *request, int mds)
   }
   request->mds = mds;
 
-  if (request->inode && request->inode->caps.count(mds))
-    request->sent_on_mseq = request->inode->caps[mds]->mseq;
+  Inode *in = request->inode();
+  if (in && in->caps.count(mds))
+    request->sent_on_mseq = in->caps[mds]->mseq;
 
   mds_sessions[mds]->requests.push_back(&request->item);
 
@@ -1482,14 +1485,16 @@ MClientRequest* Client::build_client_request(MetaRequest *request)
 
   // if the filepath's haven't been set, set them!
   if (request->path.empty()) {
-    if (request->inode)
-      request->inode->make_nosnap_relative_path(request->path);
-    else if (request->dentry) {
-      if (request->dentry->inode)
-	request->dentry->inode->make_nosnap_relative_path(request->path);
-      else if (request->dentry->dir) {
-	request->dentry->dir->parent_inode->make_nosnap_relative_path(request->path);
-	request->path.push_dentry(request->dentry->name);
+    Inode *in = request->inode();
+    Dentry *de = request->dentry();
+    if (in)
+      in->make_nosnap_relative_path(request->path);
+    else if (de) {
+      if (de->inode)
+	de->inode->make_nosnap_relative_path(request->path);
+      else if (de->dir) {
+	de->dir->parent_inode->make_nosnap_relative_path(request->path);
+	request->path.push_dentry(de->name);
       }
       else ldout(cct, 1) << "Warning -- unable to construct a filepath!"
 		   << " No path, inode, or appropriately-endowed dentry given!"
@@ -1578,10 +1583,11 @@ void Client::handle_client_reply(MClientReply *reply)
       send_request(request, request->resend_mds);
       return;
     }
-    if (!request->inode) {
+    Inode *in = request->inode();
+    if (!in) {
       ldout(cct, 10) << "Got ESTALE on request without inode!" << dendl; //do nothing
-    } else if (request->inode->caps.count(request->resend_mds) &&
-	       request->sent_on_mseq != request->inode->caps[request->resend_mds]->mseq) {
+    } else if (in->caps.count(request->resend_mds) &&
+	       request->sent_on_mseq != in->caps[request->resend_mds]->mseq) {
       // auth data out of date; send it again!
       ldout(cct, 20) << "auth data out of date, sending again" << dendl;
       send_request(request, request->resend_mds);
@@ -3753,7 +3759,7 @@ int Client::_do_lookup(Inode *dir, const char *name, Inode **target)
   dir->make_nosnap_relative_path(path);
   path.push_dentry(name);
   req->set_filepath(path);
-  req->inode = dir;
+  req->set_inode(dir);
   req->head.args.getattr.mask = 0;
   ldout(cct, 10) << "_lookup on " << path << dendl;
 
@@ -3876,7 +3882,6 @@ int Client::get_or_create(Inode *dir, const char* name,
   }
 
   // success
-  (*pdn)->get();
   return 0;
 }
 
@@ -4183,7 +4188,7 @@ int Client::_getattr(Inode *in, int mask, int uid, int gid)
   filepath path;
   in->make_nosnap_relative_path(path);
   req->set_filepath(path);
-  req->inode = in;
+  req->set_inode(in);
   req->head.args.getattr.mask = mask;
   
   int res = make_request(req, uid, gid);
@@ -4255,7 +4260,7 @@ int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid)
   filepath path;
   in->make_nosnap_relative_path(path);
   req->set_filepath(path);
-  req->inode = in;
+  req->set_inode(in);
 
   if (mask & CEPH_SETATTR_MODE) {
     req->head.args.setattr.mode = attr->st_mode;
@@ -4684,7 +4689,7 @@ int Client::_readdir_get_frag(dir_result_t *dirp)
   filepath path;
   diri->make_nosnap_relative_path(path);
   req->set_filepath(path); 
-  req->inode = diri;
+  req->set_inode(diri);
   req->head.args.readdir.frag = fg;
   if (dirp->last_name.length()) {
     req->path2.set_path(dirp->last_name.c_str());
@@ -5300,7 +5305,7 @@ int Client::_open(Inode *in, int flags, mode_t mode, Fh **fhp, int uid, int gid)
     req->head.args.open.mode = mode;
     req->head.args.open.pool = -1;
     req->head.args.open.old_size = in->size;   // for O_TRUNC
-    req->inode = in;
+    req->set_inode(in);
     result = make_request(req, uid, gid);
   }
 
@@ -5991,7 +5996,7 @@ void Client::getcwd(string& dir)
       MetaRequest *req = new MetaRequest(CEPH_MDS_OP_LOOKUPPARENT);
       filepath path(in->ino);
       req->set_filepath(path);
-      req->inode = in;
+      req->set_inode(in);
       int res = make_request(req, -1, -1);
       if (res < 0)
 	break;
@@ -6616,7 +6621,7 @@ int Client::_setxattr(Inode *in, const char *name, const void *value, size_t siz
   in->make_nosnap_relative_path(path);
   req->set_filepath(path);
   req->set_string2(name);
-  req->inode = in;
+  req->set_inode(in);
   req->head.args.setxattr.flags = flags;
 
   bufferlist bl;
@@ -6661,7 +6666,7 @@ int Client::_removexattr(Inode *in, const char *name, int uid, int gid)
   in->make_nosnap_relative_path(path);
   req->set_filepath(path);
   req->set_filepath2(name);
-  req->inode = in;
+  req->set_inode(in);
  
   int res = make_request(req, uid, gid);
 
@@ -6727,15 +6732,17 @@ int Client::_mknod(Inode *dir, const char *name, mode_t mode, dev_t rdev, int ui
   dir->make_nosnap_relative_path(path);
   path.push_dentry(name);
   req->set_filepath(path); 
-  req->inode = dir;
+  req->set_inode(dir);
   req->head.args.mknod.mode = mode;
   req->head.args.mknod.rdev = rdev;
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL;
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
 
   res = make_request(req, uid, gid);
 
@@ -6804,7 +6811,7 @@ int Client::_create(Inode *dir, const char *name, int flags, mode_t mode, Inode 
   dir->make_nosnap_relative_path(path);
   path.push_dentry(name);
   req->set_filepath(path);
-  req->inode = dir;
+  req->set_inode(dir);
   req->head.args.open.flags = flags | O_CREAT;
   req->head.args.open.mode = mode;
 
@@ -6819,9 +6826,11 @@ int Client::_create(Inode *dir, const char *name, int flags, mode_t mode, Inode 
   inodeno_t created_ino;
   bool got_created_ino = false;
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
 
   res = make_request(req, uid, gid, 0, -1, &extra_bl);
   if (res < 0) {
@@ -6885,14 +6894,16 @@ int Client::_mkdir(Inode *dir, const char *name, mode_t mode, int uid, int gid)
   dir->make_nosnap_relative_path(path);
   path.push_dentry(name);
   req->set_filepath(path);
-  req->inode = dir;
+  req->set_inode(dir);
   req->head.args.mkdir.mode = mode;
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL; 
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
   
   ldout(cct, 10) << "_mkdir: making request" << dendl;
   res = make_request(req, uid, gid);
@@ -6950,14 +6961,16 @@ int Client::_symlink(Inode *dir, const char *name, const char *target, int uid, 
   dir->make_nosnap_relative_path(path);
   path.push_dentry(name);
   req->set_filepath(path);
-  req->inode = dir;
+  req->set_inode(dir);
   req->set_string2(target); 
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL;
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
 
   res = make_request(req, uid, gid);
 
@@ -7009,16 +7022,20 @@ int Client::_unlink(Inode *dir, const char *name, int uid, int gid)
   path.push_dentry(name);
   req->set_filepath(path);
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL;
 
-  res = _lookup(dir, name, &req->other_inode);
+  Inode *otherin;
+  res = _lookup(dir, name, &otherin);
+  req->set_other_inode(otherin);
   req->other_inode_drop = CEPH_CAP_LINK_SHARED | CEPH_CAP_LINK_EXCL;
 
-  req->inode = dir;
+  req->set_inode(dir);
 
   res = make_request(req, uid, gid);
   if (res == 0) {
@@ -7067,12 +7084,18 @@ int Client::_rmdir(Inode *dir, const char *name, int uid, int gid)
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL;
   req->inode_drop = CEPH_CAP_LINK_SHARED | CEPH_CAP_LINK_EXCL;
-  req->inode = dir;
+  req->set_inode(dir);
 
-  int res = get_or_create(dir, name, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, name, &de);
   if (res < 0)
     goto fail;
-  res = _lookup(dir, name, &req->inode);
+  req->set_dentry(de);
+  Inode *in;
+  res = _lookup(dir, name, &in);
+  if (res < 0)
+    goto fail;
+  req->set_inode(in);
 
   res = make_request(req, uid, gid);
   if (res == 0) {
@@ -7127,27 +7150,37 @@ int Client::_rename(Inode *fromdir, const char *fromname, Inode *todir, const ch
   req->set_filepath(to);
   req->set_filepath2(from);
 
-  int res = get_or_create(fromdir, fromname, &req->old_dentry);
+  Dentry *oldde;
+  int res = get_or_create(fromdir, fromname, &oldde);
   if (res < 0)
     goto fail;
+  req->set_old_dentry(oldde);
   req->old_dentry_drop = CEPH_CAP_FILE_SHARED;
   req->old_dentry_unless = CEPH_CAP_FILE_EXCL;
 
-  res = get_or_create(todir, toname, &req->dentry);
+  Dentry *de;
+  res = get_or_create(todir, toname, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
   req->dentry_drop = CEPH_CAP_FILE_SHARED;
   req->dentry_unless = CEPH_CAP_FILE_EXCL;
 
-  res = _lookup(fromdir, fromname, &req->old_inode);
+  Inode *oldin;
+  res = _lookup(fromdir, fromname, &oldin);
   if (res < 0)
     goto fail;
+  req->set_old_inode(oldin);
   req->old_inode_drop = CEPH_CAP_LINK_SHARED;
 
-  res = _lookup(todir, toname, &req->other_inode);
+  Inode *otherin;
+  res = _lookup(todir, toname, &otherin);
+  if (res < 0)
+    goto fail;
+  req->set_other_inode(otherin);
   req->other_inode_drop = CEPH_CAP_LINK_SHARED | CEPH_CAP_LINK_EXCL;
 
-  req->inode = todir;
+  req->set_inode(todir);
 
   res = make_request(req, uid, gid);
 
@@ -7199,13 +7232,15 @@ int Client::_link(Inode *in, Inode *dir, const char *newname, int uid, int gid)
   filepath existing(in->ino);
   req->set_filepath2(existing);
 
-  req->inode = dir;
+  req->set_inode(dir);
   req->inode_drop = CEPH_CAP_FILE_SHARED;
   req->inode_unless = CEPH_CAP_FILE_EXCL;
 
-  int res = get_or_create(dir, newname, &req->dentry);
+  Dentry *de;
+  int res = get_or_create(dir, newname, &de);
   if (res < 0)
     goto fail;
+  req->set_dentry(de);
   
   res = make_request(req, uid, gid);
   ldout(cct, 10) << "link result is " << res << dendl;
