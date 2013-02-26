@@ -180,10 +180,16 @@ void LogSegment::try_to_expire(MDS *mds, C_GatherBuilder &gather_bld)
     }
   }
 
-  // backtraces
-  for (elist<cinode_backtrace_info_t*>::iterator p = backtraces.begin(); !p.end(); ++p) {
+  // backtraces to be stored/updated
+  for (elist<cinode_backtrace_info_t*>::iterator p = update_backtraces.begin(); !p.end(); ++p) {
     struct cinode_backtrace_info_t *btinfo = *p;
     btinfo->inode->store_backtrace(btinfo, gather_bld.new_sub());
+  }
+
+  // backtraces to be removed
+  for (elist<cinode_backtrace_ref_t*>::iterator p = remove_backtraces.begin(); !p.end(); ++p) {
+    struct cinode_backtrace_ref_t *btref = *p;
+    btref->remove_backtrace(mds, gather_bld.new_sub());
   }
 
   // slave updates

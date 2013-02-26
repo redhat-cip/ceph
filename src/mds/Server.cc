@@ -2627,7 +2627,7 @@ public:
     reply->set_extra_bl(mdr->reply_extra_bl);
     mds->server->reply_request(mdr, reply);
 
-    newi->queue_backtrace(mdr->ls, newi->inode.layout.fl_pg_pool);
+    newi->queue_backtrace_update(mdr->ls, newi->inode.layout.fl_pg_pool);
     assert(g_conf->mds_kill_openc_at != 1);
   }
 };
@@ -3050,10 +3050,10 @@ public:
 
     // if pool changed, queue a new backtrace and set forward pointer on old
     if (old_pool != in->inode.layout.fl_pg_pool) {
-      in->queue_backtrace(mdr->ls, in->inode.layout.fl_pg_pool);
+      in->queue_backtrace_update(mdr->ls, in->inode.layout.fl_pg_pool);
 
       // set forwarding pointer on old backtrace
-      in->queue_backtrace(mdr->ls, old_pool, in->inode.layout.fl_pg_pool);
+      in->queue_backtrace_update(mdr->ls, old_pool, in->inode.layout.fl_pg_pool);
     }
   }
 };
@@ -3928,10 +3928,10 @@ public:
     // store the backtrace on the 'parent' xattr
     if (newi->inode.is_dir()) {
       // if its a dir, put it in the metadata pool
-      newi->queue_backtrace(mdr->ls, mds->mdsmap->get_metadata_pool());
+      newi->queue_backtrace_update(mdr->ls, mds->mdsmap->get_metadata_pool());
     } else {
       // if its a file, put it in the data pool for that file
-      newi->queue_backtrace(mdr->ls, newi->inode.layout.fl_pg_pool);
+      newi->queue_backtrace_update(mdr->ls, newi->inode.layout.fl_pg_pool);
     }
 
     // reply
@@ -5857,7 +5857,7 @@ void Server::_rename_finish(MDRequest *mdr, CDentry *srcdn, CDentry *destdn, CDe
       cinode_backtrace_info_t *oldinfo = destdnl->inode->backtraces.back();
       delete oldinfo;
     }
-    destdnl->inode->queue_backtrace(mdr->ls, mds->mdsmap->get_metadata_pool());
+    destdnl->inode->queue_backtrace_update(mdr->ls, mds->mdsmap->get_metadata_pool());
 
   } else {
     // remove all pending backtraces going to the same pool
@@ -5870,7 +5870,7 @@ void Server::_rename_finish(MDRequest *mdr, CDentry *srcdn, CDentry *destdn, CDe
 	delete info;
       }
     }
-    destdnl->inode->queue_backtrace(mdr->ls, destdnl->inode->inode.layout.fl_pg_pool);
+    destdnl->inode->queue_backtrace_update(mdr->ls, destdnl->inode->inode.layout.fl_pg_pool);
   }
   assert(g_conf->mds_kill_rename_at != 8);
 

@@ -74,7 +74,7 @@ cinode_backtrace_info_t::cinode_backtrace_info_t(
 
   // on setlayout cases, forward pointers mean pool != location, but for all others it does
   if (pool == -1) pool = location;
-  ls->backtraces.push_back(&item_logseg);
+  ls->update_backtraces.push_back(&item_logseg);
   inode->backtraces.push_back(&item_inode);
   inode->get(CInode::PIN_DIRTYPARENT);
 }
@@ -1069,6 +1069,48 @@ void CInode::_stored_backtrace(version_t v, cinode_backtrace_info_t *info, Conte
   }
 }
 
+struct C_Inode_RemovedBacktrace : public Context {
+  cinode_backtrace_ref_t *ref;
+  Context *fin;
+  C_Inode_RemovedBacktrace(cinode_backtrace_ref_t *r, Context *f) : ref(r), fin(f) {}
+  void finish(int r) {
+    ref->_removed(fin);
+  }
+};
+
+cinode_backtrace_ref_t::cinode_backtrace_ref_t(object_t o, int64_t l, LogSegment *ls) : oid(o), location(l)
+{
+  ls->remove_backtraces.push_back(&item_logseg);
+}
+
+cinode_backtrace_ref_t::~cinode_backtrace_ref_t()
+{
+  item_logseg.remove_myself();
+}
+
+void cinode_backtrace_ref_t::remove_backtrace(MDS *mds, Context *fin)
+{
+
+  ObjectOperation m;
+  inode_backtrace_t bt;
+  bufferlist parent;
+  // encode an empty backtrace to store instead of removing the xattr
+  ::encode(bt, parent);
+  m.setxattr("parent", parent);
+  SnapContext snapc;
+  object_locator_t oloc(location);
+  mds->objecter->mutate(oid, oloc, m, snapc, ceph_clock_now(g_ceph_context), 0,
+		        NULL, new C_Inode_RemovedBacktrace(this, fin) );
+}
+
+void cinode_backtrace_ref_t::_removed(Context *fin) {
+  delete this;
+  if (fin) {
+    fin->finish(0);
+    delete fin;
+  }
+}
+
 void CInode::encode_store(bufferlist& bl)
 {
   ENCODE_START(3, 3, bl);
@@ -1112,11 +1154,22 @@ void CInode::decode_store(bufferlist::iterator& bl) {
   DECODE_FINISH(bl);
 }
 
-void CInode::queue_backtrace(LogSegment *ls, int64_t location, int64_t pool) {
+void CInode::queue_backtrace_update(LogSegment *ls, int64_t location, int64_t pool) {
     // allocating a pointer here and not setting it to anything
     // might look strange, but the constructor adds itself to the backtraces
     // list of this CInode, which is how we keep track of it
     new cinode_backtrace_info_t(location, this, ls, pool);
+}
+
+void CInode::queue_backtrace_remove(LogSegment *ls) {
+  uint64_t location;
+  object_t oid = get_object_name(ino(), frag_t(), "");
+  if (is_dir()) {
+    location = mdcache->mds->mdsmap->get_metadata_pool();
+  } else {
+    location = inode.layout.fl_pg_pool;
+  }
+  new cinode_backtrace_ref_t(oid, location, ls);
 }
 
 // ------------------

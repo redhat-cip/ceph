@@ -47,6 +47,7 @@ class CDir;
 class Message;
 class CInode;
 class MDCache;
+class MDS;
 class LogSegment;
 class SnapRealm;
 class Session;
@@ -65,6 +66,19 @@ public:
   elist<struct cinode_backtrace_info_t*>::item item_inode;
   cinode_backtrace_info_t(int64_t l, CInode *i, LogSegment *ls, int64_t p = -1);
   ~cinode_backtrace_info_t();
+};
+
+// We use a separate ref structure for remove with only oid/location to avoid
+// keeping a reference to the CInode for later
+class cinode_backtrace_ref_t {
+public:
+  object_t oid;
+  int64_t location;
+  elist<struct cinode_backtrace_ref_t*>::item item_logseg;
+  cinode_backtrace_ref_t(object_t o, int64_t l, LogSegment *ls);
+  ~cinode_backtrace_ref_t();
+  void remove_backtrace(MDS *mds, Context *fin);
+  void _removed(Context *fin);
 };
 
 struct cinode_lock_info_t {
@@ -567,7 +581,9 @@ private:
   void build_backtrace(inode_backtrace_t& bt);
   unsigned encode_parent_mutation(ObjectOperation& m, int64_t pool);
 
-  void queue_backtrace(LogSegment *ls, int64_t location, int64_t pool = -1);
+  void queue_backtrace_update(LogSegment *ls, int64_t location, int64_t pool = -1);
+
+  void queue_backtrace_remove(LogSegment *ls);
 
   void encode_store(bufferlist& bl);
   void decode_store(bufferlist::iterator& bl);

@@ -255,6 +255,9 @@ void MDCache::remove_inode(CInode *o)
       base_inodes.erase(o);
     }
 
+  // remove all queued backtraces
+  o->remove_all_queued_backtraces();
+
   // delete it
   assert(o->get_num_ref() == 0);
   delete o; 
