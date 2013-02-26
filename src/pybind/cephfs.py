@@ -1,6 +1,6 @@
 """libcephfs Python ctypes wrapper
 """
-from ctypes import CDLL, c_char_p, c_size_t, c_void_p, c_int, c_long, c_uint, \
+from ctypes import CDLL, c_char_p, c_size_t, c_void_p, c_int, c_long, c_uint, c_ulong, \
     create_string_buffer, byref, Structure, c_uint64, c_ubyte, pointer, \
     CFUNCTYPE
 import threading
@@ -33,7 +33,7 @@ class NoSpace(Error):
 class IncompleteWriteError(Error):
     pass
 
-class RadosStateError(Error):
+class LibCephFSStateError(Error):
     pass
 
 class IoctxStateError(Error):
@@ -75,21 +75,49 @@ class cephfs_statvfs(Structure):
                 ("f_flag", c_uint),
                 ("f_namemax", c_uint)]
 
+# struct timespec {
+#   long int tv_sec;
+#   long int tv_nsec;
+# }
+class cephfs_timespec(Structure):
+    _fields_ = [('tv_sec', c_long),
+                ('tv_nsec', c_long)]
+
+# struct stat {
+#   unsigned long st_dev;
+#   unsigned long st_ino;
+#   unsigned long st_nlink;
+#   unsigned int st_mode;
+#   unsigned int st_uid;
+#   unsigned int st_gid;
+#   int __pad0;
+#   unsigned long st_rdev;
+#   long int st_size;
+#   long int st_blksize;
+#   long int st_blocks;
+#   struct timespec st_atim;
+#   struct timespec st_mtim;
+#   struct timespec st_ctim;
+#   long int __unused[3];
+# };
 class cephfs_stat(Structure):
-    _fields_ = [("st_dev", c_uint), # ID of device containing file
-                ("st_ino", c_uint), # inode number
-                ("st_mode", c_uint), # protection
-                ("st_nlink", c_uint), # number of hard links
-                ("st_uid", c_uint), # user ID of owner
-                ("st_gid", c_uint), # group ID of owner
-                ("st_rdev", c_uint), # device ID (if special file)
-                ("st_size", c_uint), # total size, in bytes
-                ("st_blksize", c_uint), # blocksize for file system I/O
-                ("st_blocks", c_uint), # number of 512B blocks allocated
-                ("st_atime", c_uint), # time of last access
-                ("st_mtime", c_uint), # time of last modification
-                ("st_ctime", c_uint), # time of last status change
-                ]
+    _fields_ = [('st_dev', c_ulong), # ID of device containing file
+                ('st_ino', c_ulong), # inode number
+                ('st_nlink', c_ulong), # number of hard links
+                ('st_mode', c_uint), # protection
+                ('st_uid', c_uint), # user ID of owner
+                ('st_gid', c_uint), # group ID of owner
+                ('__pad0', c_int),
+                ('st_rdev', c_ulong), # device ID (if special file)
+                ('st_size', c_long), # total size, in bytes
+                ('st_blksize', c_long), # blocksize for file system I/O
+                ('st_blocks', c_long), # number of 512B blocks allocated
+                ('st_atime', cephfs_timespec), # time of last access
+                ('st_mtime', cephfs_timespec), # time of last modification
+                ('st_ctime', cephfs_timespec), # time of last status change
+                ('__unused1', c_long),
+                ('__unused2', c_long),
+                ('__unused3', c_long) ]
 
 class Version:
     def __init__(self, major, minor, extra):
@@ -106,7 +134,7 @@ class LibCephFS(object):
         for a in args:
             if self.state == a:
                 return
-        raise RadosStateError("You cannot perform that operation on a \
+        raise LibCephFSStateError("You cannot perform that operation on a \
 CephFS object in state %s." % (self.state))
 
     def __init__(self, conf=None, conffile=None):
@@ -128,9 +156,16 @@ CephFS object in state %s." % (self.state))
             for key, value in conf.iteritems():
                 self.conf_set(key, value)
 
+    def conf_read_file(self, conffile=None):
+        if conffile == '':
+            conffile = None
+        ret = self.libcephfs.ceph_conf_read_file(self.cluster, conffile)
+        if (ret != 0):
+            raise make_ex(ret, "error calling conf_read_file")
+
     def shutdown(self):
         if (self.__dict__.has_key("state") and self.state != "shutdown"):
-            self.libcephfs.cephfs_shutdown(self.cluster)
+            self.libcephfs.ceph_shutdown(self.cluster)
             self.state = "shutdown"
 
     def __enter__(self):
@@ -298,3 +333,10 @@ CephFS object in state %s." % (self.state))
                 'st_mtime': statbuf.st_mtime,
                 'st_ctime': statbuf.st_ctime }
 
+    def unlink(self, path):
+        self.require_state("mounted")
+        ret = self.libcephfs.ceph_unlink(
+            self.cluster,
+            c_char_p(path))
+        if ret < 0:
+            raise make_ex(ret, "error in unlink: %s" % path)
