@@ -93,8 +93,8 @@ void inode_backtrace_t::dump(Formatter *f) const
     p->dump(f);
     f->close_section();
   }
-  f->dump_int("pool", pool);
   f->close_section();
+  f->dump_int("pool", pool);
 }
 
 void inode_backtrace_t::generate_test_instances(list<inode_backtrace_t*>& ls)
