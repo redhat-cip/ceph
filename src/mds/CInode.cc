@@ -83,6 +83,9 @@ cinode_backtrace_info_t::~cinode_backtrace_info_t() {
   item_logseg.remove_myself();
   item_inode.remove_myself();
   inode->put(CInode::PIN_DIRTYPARENT);
+  if (inode->get_num_ref() == 0) {
+    delete inode;
+  }
 }
 
 /*

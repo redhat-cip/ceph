@@ -204,6 +204,7 @@ void MDCache::add_inode(CInode *in)
   // add to lru, inode map
   assert(inode_map.count(in->vino()) == 0);  // should be no dup inos!
   inode_map[ in->vino() ] = in;
+  in->get(CInode::PIN_CACHED);
 
   if (in->ino() < MDS_INO_SYSTEM_BASE) {
     if (in->ino() == MDS_INO_ROOT)
@@ -253,14 +254,12 @@ void MDCache::remove_inode(CInode *o)
     }
     if (o->is_base())
       base_inodes.erase(o);
-    }
+  }
 
-  // remove all queued backtraces
-  o->remove_all_queued_backtraces();
-
-  // delete it
-  assert(o->get_num_ref() == 0);
-  delete o; 
+  o->put(CInode::PIN_CACHED);
+  // if the ref drops to zero, delete it
+  if (o->get_num_ref() == 0)
+    delete o;
 }
 
 
