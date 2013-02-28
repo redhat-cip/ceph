@@ -465,75 +465,6 @@ done:
   return ret;
 }
 
-static void remove_old_indexes(RGWUserInfo& old_info, RGWUserInfo& new_info)
-{
-  int ret;
-  bool success = true;
-
-  if (!old_info.user_id.empty() && old_info.user_id.compare(new_info.user_id) != 0) {
-    ret = rgw_remove_uid_index(store, old_info.user_id);
-    if (ret < 0 && ret != -ENOENT) {
-      cerr << "ERROR: could not remove index for uid " << old_info.user_id << " return code: " << ret << std::endl;
-      success = false;
-    }
-  }
-
-  if (!old_info.user_email.empty() &&
-      old_info.user_email.compare(new_info.user_email) != 0) {
-    ret = rgw_remove_email_index(store, old_info.user_email);
-    if (ret < 0 && ret != -ENOENT) {
-      cerr << "ERROR: could not remove index for email " << old_info.user_email << " return code: " << ret << std::endl;
-      success = false;
-    }
-  }
-
-  map<string, RGWAccessKey>::iterator old_iter;
-  for (old_iter = old_info.swift_keys.begin(); old_iter != old_info.swift_keys.end(); ++old_iter) {
-    RGWAccessKey& swift_key = old_iter->second;
-    map<string, RGWAccessKey>::iterator new_iter = new_info.swift_keys.find(swift_key.id);
-    if (new_iter == new_info.swift_keys.end()) {
-      ret = rgw_remove_swift_name_index(store, swift_key.id);
-      if (ret < 0 && ret != -ENOENT) {
-        cerr << "ERROR: could not remove index for swift_name " << swift_key.id << " return code: " << ret << std::endl;
-        success = false;
-      }
-    }
-  }
-
-  /* we're not removing access keys here.. keys are removed explicitly using the key rm command and removing the old key
-     index is handled there */
-
-  if (!success)
-    cerr << "ERROR: this should be fixed manually!" << std::endl;
-}
-
-static bool char_is_unreserved_url(char c)
-{
-  if (isalnum(c))
-    return true;
-
-  switch (c) {
-  case '-':
-  case '.':
-  case '_':
-  case '~':
-    return true;
-  default:
-    return false;
-  }
-}
-
-static bool validate_access_key(string& key)
-{
-  const char *p = key.c_str();
-  while (*p) {
-    if (!char_is_unreserved_url(*p))
-      return false;
-    p++;
-  }
-  return true;
-}
-
 static void dump_bucket_usage(map<RGWObjCategory, RGWBucketStats>& stats, Formatter *formatter)
 {
   map<RGWObjCategory, RGWBucketStats>::iterator iter;
@@ -577,11 +508,6 @@ int bucket_stats(rgw_bucket& bucket, Formatter *formatter)
 
   return 0;
 }
-
-enum ObjectKeyType {
-  KEY_TYPE_SWIFT,
-  KEY_TYPE_S3,
-};
 
 static void check_bad_index_multipart(RGWRados *store, rgw_bucket& bucket, bool fix)
 {
@@ -704,82 +630,6 @@ static void check_bad_user_bucket_mapping(RGWRados *store, const string& user_id
     }
   }
 }
-
-static int remove_object(RGWRados *store, rgw_bucket& bucket, std::string& object)
-{
-  RGWRadosCtx *rctx = new RGWRadosCtx(store);
-  rgw_obj obj(bucket,object);
-
-  int ret = store->delete_obj(rctx, obj);
-
-  return ret;
-}
-
-static int remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
-{
-  map<RGWObjCategory, RGWBucketStats> stats;
-  std::vector<RGWObjEnt> objs;
-  std::string prefix, delim, marker, ns;
-  map<string, bool> common_prefixes;
-  rgw_obj obj;
-  RGWBucketInfo info;
-  bufferlist bl;
-
-  int ret = store->get_bucket_stats(bucket, stats);
-
-  if (ret < 0)
-    return ret;
-
-  obj.bucket = bucket;
-  int max = 1000;
-
-  ret = rgw_get_obj(store, NULL, store->params.domain_root, bucket.name, bl, NULL);
-
-  bufferlist::iterator iter = bl.begin();
-  try {
-    ::decode(info, iter);
-  } catch (buffer::error& err) {
-    cerr << "ERROR: could not decode buffer info, caught buffer::error" << std::endl;
-    return -EIO;
-  }
-
-  if (delete_children) {
-    ret = store->list_objects(bucket, max, prefix, delim, marker, objs, common_prefixes,
-                                 false, ns, (bool *)false, NULL);
-    if (ret < 0)
-      return ret;
-
-    while (!objs.empty()) {
-      std::vector<RGWObjEnt>::iterator it = objs.begin();
-      for (it = objs.begin(); it != objs.end(); it++) {
-        ret = remove_object(store, bucket, (*it).name);
-        if (ret < 0)
-          return ret;
-      }
-      objs.clear();
-
-      ret = store->list_objects(bucket, max, prefix, delim, marker, objs, common_prefixes,
-                                   false, ns, (bool *)false, NULL);
-      if (ret < 0)
-        return ret;
-    }
-  }
-
-  ret = store->delete_bucket(bucket);
-  if (ret < 0) {
-    cerr << "ERROR: could not remove bucket " << bucket.name << std::endl;
-
-    return ret;
-  }
-
-  ret = rgw_remove_user_bucket_info(store, info.owner, bucket);
-  if (ret < 0) {
-    cerr << "ERROR: unable to remove user bucket information" << std::endl;
-  }
-
-  return ret;
-}
-
 static bool bucket_object_check_filter(const string& name)
 {
   string ns;
@@ -813,17 +663,11 @@ int main(int argc, char **argv)
   ObjectKeyType key_type = KEY_TYPE_S3;
   rgw_bucket bucket;
   uint32_t perm_mask = 0;
-  bool specified_perm_mask = false;
   RGWUserInfo info;
   int opt_cmd = OPT_NO_CMD;
   bool need_more;
   int gen_secret = false;
   int gen_key = false;
-  bool implicit_gen_secret = true;
-  bool implicit_gen_key = true;
-  char secret_key_buf[SECRET_KEY_LEN + 1];
-  char public_id_buf[PUBLIC_ID_LEN + 1];
-  bool user_modify_op;
   string bucket_id;
   Formatter *formatter = NULL;
   int purge_data = false;
@@ -840,6 +684,7 @@ int main(int argc, char **argv)
   map<string, bool> categories;
   string caps;
   int check_objects = false;
+  RGWUserAdminRequest req;
 
   std::string val;
   std::ostringstream errs;
@@ -852,16 +697,22 @@ int main(int argc, char **argv)
       return 0;
     } else if (ceph_argparse_witharg(args, i, &val, "-i", "--uid", (char*)NULL)) {
       user_id = val;
+      req.set_user_id(user_id);
     } else if (ceph_argparse_witharg(args, i, &val, "--access-key", (char*)NULL)) {
       access_key = val;
+      req.set_access_key(access_key);
     } else if (ceph_argparse_witharg(args, i, &val, "--subuser", (char*)NULL)) {
       subuser = val;
+      req.set_subuser(subuser);
     } else if (ceph_argparse_witharg(args, i, &val, "--secret", (char*)NULL)) {
       secret_key = val;
+      req.key = secret_key;
     } else if (ceph_argparse_witharg(args, i, &val, "-e", "--email", (char*)NULL)) {
       user_email = val;
+      req.set_user_email(user_email);
     } else if (ceph_argparse_witharg(args, i, &val, "-n", "--display-name", (char*)NULL)) {
       display_name = val;
+      req.set_display_name(display_name);
     } else if (ceph_argparse_witharg(args, i, &val, "-b", "--bucket", (char*)NULL)) {
       bucket_name = val;
     } else if (ceph_argparse_witharg(args, i, &val, "-p", "--pool", (char*)NULL)) {
@@ -878,10 +729,12 @@ int main(int argc, char **argv)
         cerr << "bad key type: " << key_type_str << std::endl;
         return usage();
       }
+
+      req.set_key_type(key_type);
     } else if (ceph_argparse_binary_flag(args, i, &gen_key, NULL, "--gen-access-key", (char*)NULL)) {
-      implicit_gen_key = false;
+      req.set_gen_access();
     } else if (ceph_argparse_binary_flag(args, i, &gen_secret, NULL, "--gen-secret", (char*)NULL)) {
-      implicit_gen_secret = false;
+      req.set_gen_secret();
     } else if (ceph_argparse_binary_flag(args, i, &show_log_entries, NULL, "--show_log_entries", (char*)NULL)) {
       // do nothing
     } else if (ceph_argparse_binary_flag(args, i, &show_log_sum, NULL, "--show_log_sum", (char*)NULL)) {
@@ -895,6 +748,7 @@ int main(int argc, char **argv)
       }
     } else if (ceph_argparse_witharg(args, i, &val, "--max-buckets", (char*)NULL)) {
       max_buckets = atoi(val.c_str());
+      req.set_max_buckets(max_buckets);
     } else if (ceph_argparse_witharg(args, i, &val, "--date", "--time", (char*)NULL)) {
       date = val;
       if (end_date.empty())
@@ -906,7 +760,7 @@ int main(int argc, char **argv)
     } else if (ceph_argparse_witharg(args, i, &val, "--access", (char*)NULL)) {
       access = val;
       perm_mask = str_to_perm(access.c_str());
-      specified_perm_mask = true;
+      req.set_perm(perm_mask);
     } else if (ceph_argparse_witharg(args, i, &val, "--bucket-id", (char*)NULL)) {
       bucket_id = val;
       if (bucket_id.empty()) {
@@ -930,21 +784,20 @@ int main(int argc, char **argv)
     } else if (ceph_argparse_binary_flag(args, i, &purge_data, NULL, "--purge-data", (char*)NULL)) {
       delete_child_objects = purge_data;
     } else if (ceph_argparse_binary_flag(args, i, &purge_keys, NULL, "--purge-keys", (char*)NULL)) {
-      // do nothing
+      req.purge_keys = true;
     } else if (ceph_argparse_binary_flag(args, i, &yes_i_really_mean_it, NULL, "--yes-i-really-mean-it", (char*)NULL)) {
       // do nothing
     } else if (ceph_argparse_binary_flag(args, i, &fix, NULL, "--fix", (char*)NULL)) {
       // do nothing
-    } else if (ceph_argparse_binary_flag(args, i, &check_objects, NULL, "--check-objects", (char*)NULL)) {
-      // do nothing
     } else if (ceph_argparse_witharg(args, i, &val, "--caps", (char*)NULL)) {
       caps = val;
+      req.set_caps(val);
     } else {
       ++i;
     }
   }
 
-  if (args.empty()) {
+  if (args.size() == 0) {
     return usage();
   }
   else {
@@ -978,165 +831,12 @@ int main(int argc, char **argv)
     return usage();
   }
 
-  if (!subuser.empty()) {
-    char *suser = strdup(subuser.c_str());
-    char *p = strchr(suser, ':');
-    if (p) {
-      *p = '\0';
-      if (!user_id.empty()) {
-        if (user_id != suser) {
-          cerr << "bad subuser " << subuser << " for uid " << user_id << std::endl;
-          return 1;
-        }
-      } else {
-        user_id = suser;
-      }
-      subuser = p + 1;
-    }
-    free(suser);
-  }
-
-  if (opt_cmd == OPT_KEY_RM && key_type == KEY_TYPE_S3 && access_key.empty()) {
-    cerr << "error: access key was not specified" << std::endl;
-    return usage();
-  }
-
-  user_modify_op = (opt_cmd == OPT_USER_MODIFY || opt_cmd == OPT_SUBUSER_MODIFY ||
-                    opt_cmd == OPT_SUBUSER_CREATE || opt_cmd == OPT_SUBUSER_RM ||
-                    opt_cmd == OPT_KEY_CREATE || opt_cmd == OPT_KEY_RM || opt_cmd == OPT_USER_RM ||
-		    opt_cmd == OPT_CAPS_ADD || opt_cmd == OPT_CAPS_RM);
 
   store = RGWStoreManager::get_storage(g_ceph_context, false);
   if (!store) {
     cerr << "couldn't init storage provider" << std::endl;
     return 5; //EIO
   }
-
-  StoreDestructor store_destructor(store);
-
-  if (opt_cmd != OPT_USER_CREATE && 
-      opt_cmd != OPT_LOG_SHOW && opt_cmd != OPT_LOG_LIST && opt_cmd != OPT_LOG_RM && 
-      user_id.empty()) {
-    bool found = false;
-    string s;
-    if (!found && (!user_email.empty())) {
-      s = user_email;
-      if (rgw_get_user_info_by_email(store, s, info) >= 0) {
-	found = true;
-      } else {
-	cerr << "could not find user by specified email" << std::endl;
-      }
-    }
-    if (!found && (!access_key.empty())) {
-      s = access_key;
-      if (rgw_get_user_info_by_access_key(store, s, info) >= 0) {
-	found = true;
-      } else {
-	cerr << "could not find user by specified access key" << std::endl;
-      }
-    }
-    if (found)
-      user_id = info.user_id.c_str();
-  }
-
-
-  if (user_modify_op || opt_cmd == OPT_USER_CREATE ||
-      opt_cmd == OPT_USER_INFO || opt_cmd == OPT_BUCKET_UNLINK || opt_cmd == OPT_BUCKET_LINK ||
-      opt_cmd == OPT_USER_SUSPEND || opt_cmd == OPT_USER_ENABLE) {
-    if (user_id.empty()) {
-      cerr << "user_id was not specified, aborting" << std::endl;
-      return usage();
-    }
-
-    bool found = (rgw_get_user_info_by_uid(store, user_id, info) >= 0);
-
-    if (opt_cmd == OPT_USER_CREATE) {
-      if (found) {
-        if (info.display_name.compare(display_name) != 0 ||
-            info.user_email.compare(user_email) != 0) {
-          cerr << "error: user already exists with different display_name/email" << std::endl;
-          return 1;
-        }
-        /* turn into OPT_USER_MODIFY */
-        opt_cmd = OPT_USER_MODIFY;
-        user_modify_op = true;
-      }
-    } else if (!found) {
-      cerr << "error reading user info, aborting" << std::endl;
-      return 1;
-    }
-  }
-
-  bool subuser_found = false;
-
-  if (!subuser.empty()) {
-    map<string, RGWSubUser>::iterator iter = info.subusers.find(subuser);
-    subuser_found = (iter != info.subusers.end());
-
-    if (!subuser_found && opt_cmd != OPT_SUBUSER_CREATE && opt_cmd != OPT_USER_CREATE) {
-      cerr << "subuser specified but was not found, aborting" << std::endl;
-      return 1;
-    }
-  }
-
-  if (opt_cmd == OPT_SUBUSER_CREATE || opt_cmd == OPT_SUBUSER_MODIFY ||
-      opt_cmd == OPT_SUBUSER_RM) {
-    if (subuser.empty()) {
-      cerr << "subuser creation was requires specifying subuser name" << std::endl;
-      return 1;
-    }
-    if (opt_cmd == OPT_SUBUSER_CREATE) {
-      if (subuser_found) {
-        cerr << "error: subuser already exists" << std::endl;
-        return 1;
-      }
-      if (!key_type_str.empty() && key_type == KEY_TYPE_S3) {
-        cerr << "error: subusers may not be created with an S3 key, aborting" << std::endl;
-        return 1;
-      }
-    } else if (!subuser_found) {
-      cerr << "error: subuser doesn't exist" << std::endl;
-      return 1;
-    }
-  }
-
-  bool keys_not_requested = (access_key.empty() && secret_key.empty() && !gen_secret && !gen_key &&
-                             opt_cmd != OPT_KEY_CREATE);
-
-  if (opt_cmd == OPT_USER_CREATE || (user_modify_op && !keys_not_requested)) {
-    int ret;
-
-    if (opt_cmd == OPT_USER_CREATE && display_name.empty()) {
-      cerr << "display name was not specified, aborting" << std::endl;
-      return 0;
-    }
-
-    if ((secret_key.empty() && implicit_gen_secret) || gen_secret) {
-      ret = gen_rand_base64(g_ceph_context, secret_key_buf, sizeof(secret_key_buf));
-      if (ret < 0) {
-        cerr << "aborting" << std::endl;
-        return 1;
-      }
-      secret_key = secret_key_buf;
-    }
-    if ((access_key.empty() && implicit_gen_key) || gen_key) {
-      RGWUserInfo duplicate_check;
-      string duplicate_check_id;
-      do {
-	ret = gen_rand_alphanumeric_upper(g_ceph_context, public_id_buf, sizeof(public_id_buf));
-	if (ret < 0) {
-	  cerr << "aborting" << std::endl;
-	  return 1;
-	}
-	access_key = public_id_buf;
-	duplicate_check_id = access_key;
-      } while (!rgw_get_user_info_by_access_key(store, duplicate_check_id, duplicate_check));
-    }
-  }
-
-  map<string, RGWAccessKey>::iterator kiter;
-  map<string, RGWSubUser>::iterator uiter;
-  RGWUserInfo old_info = info;
 
   if (!bucket_name.empty()) {
     string bucket_name_str = bucket_name;
@@ -1149,132 +849,218 @@ int main(int argc, char **argv)
     bucket = bucket_info.bucket;
   }
 
-  int err;
+  // RGWUser to use for user operations
+  RGWUser user(store, req);
+
+  // required to gather errors from operations
+  std::string err_msg;
+
+  // various condition flags
+  bool created;
+  bool modified;
+  bool removed;
+  bool fetched;
+
   switch (opt_cmd) {
   case OPT_USER_CREATE:
-  case OPT_USER_MODIFY:
-  case OPT_SUBUSER_CREATE:
-  case OPT_SUBUSER_MODIFY:
-  case OPT_KEY_CREATE:
-  case OPT_CAPS_ADD:
-  case OPT_CAPS_RM:
-    if (!user_id.empty())
-      info.user_id = user_id;
-    if (max_buckets >= 0)
-      info.max_buckets = max_buckets;
-    if (key_type == KEY_TYPE_SWIFT) {
-      access_key = info.user_id;
-      access_key.append(":");
-      access_key.append(subuser);
-    }
-    if ((!access_key.empty()) && (!secret_key.empty())) {
-      if (key_type == KEY_TYPE_S3 && !validate_access_key(access_key)) {
-        cerr << "access key contains illegal characters" << std::endl;
-        return 1;
-      }
-      RGWAccessKey k;
-      k.id = access_key;
-      k.key = secret_key;
-      if (!subuser.empty())
-        k.subuser = subuser;
-      if (key_type == KEY_TYPE_SWIFT)
-        info.swift_keys[access_key] = k;
-      else
-        info.access_keys[access_key] = k;
-   } else if (opt_cmd == OPT_KEY_CREATE && (access_key.empty() || secret_key.empty())) {
-      if (key_type == KEY_TYPE_SWIFT)
-        cerr << "swift key modification requires both subuser and secret key" << std::endl;
-      else
-        cerr << "access key modification requires both access key and secret key" << std::endl;
+    created = user.add(req, err_msg);
+    if (!created) {
+      cerr << "could not create user: " << err_msg << std::endl;
       return 1;
-    } else if (opt_cmd == OPT_CAPS_ADD) {
-      err = info.caps.add_from_string(caps);
-      if (err < 0) {
-        cerr << "failed to add caps, err=" << cpp_strerror(-err) << std::endl;
-	return 1;
-      }
-    } else if (opt_cmd == OPT_CAPS_RM) {
-      err = info.caps.remove_from_string(caps);
-      if (err < 0) {
-        cerr << "failed to remove caps, err=" << cpp_strerror(-err) << std::endl;
-	return 1;
-      }
-    }
-    if (!display_name.empty())
-      info.display_name = display_name;
-    if (!user_email.empty())
-      info.user_email = user_email;
-    if (!subuser.empty()) {
-      RGWSubUser u = info.subusers[subuser];
-      u.name = subuser;
-      if (specified_perm_mask)
-        u.perm_mask = perm_mask;
-
-      info.subusers[subuser] = u;
-    }
-    if ((err = rgw_store_user_info(store, info, &old_info, false)) < 0) {
-      cerr << "error storing user info: " << cpp_strerror(-err) << std::endl;
-      break;
     }
 
-    remove_old_indexes(old_info, info);
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
 
     show_user_info(info, formatter);
-    break;
 
+    break;
+  case OPT_USER_RM:
+    removed = user.remove(req, err_msg);
+    if (!removed) {
+      cerr << "could not remove user: " << err_msg << std::endl;
+      return 1;
+    }
+
+    break;
+  case OPT_USER_MODIFY:
+    modified = user.modify(req, err_msg);
+    if (!modified) {
+      cerr << "could not modify user: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_USER_ENABLE:
+    req.set_suspension(0);
+
+    //test if need to explicitly pass request here
+    modified = user.modify(req, err_msg);
+    if (!modified) {
+      cerr << "could not enable user: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_USER_SUSPEND:
+    req.set_suspension(1);
+
+    //test if need to explicitly pass request here
+    modified = user.modify(req, err_msg);
+    if (!modified) {
+      cerr << "could not suspend user: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_SUBUSER_CREATE:
+    created = user.subusers->add(req, err_msg);
+    if (!created) {
+      cerr << "could not create subuser: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_SUBUSER_MODIFY:
+    modified = user.subusers->modify(req, err_msg);
+    if (!modified) {
+      cerr << "could not modify subuser: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
   case OPT_SUBUSER_RM:
-    uiter = info.subusers.find(subuser);
-    assert (uiter != info.subusers.end());
-    info.subusers.erase(uiter);
-    if (purge_keys) {
-      map<string, RGWAccessKey> *keys_map;
-      access_key = info.user_id;
-      access_key.append(":");
-      access_key.append(subuser);
-      keys_map = &info.swift_keys;
-      kiter = keys_map->find(access_key);
-      if (kiter != keys_map->end()) {
-        rgw_remove_key_index(store, kiter->second);
-        keys_map->erase(kiter);
-      }
+    removed = user.subusers->remove(req, err_msg);
+    if (!removed) {
+      cerr << "could not remove subuser: " << err_msg << std::endl;
+      return 1;
     }
-    if ((err = rgw_store_user_info(store, info, &old_info, false)) < 0) {
-      cerr << "error storing user info: " << cpp_strerror(-err) << std::endl;
-      break;
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
     }
-    remove_old_indexes(old_info, info);
 
     show_user_info(info, formatter);
-    break;
 
+    break;
+  case OPT_CAPS_ADD:
+    created = user.caps->add(req, err_msg);
+    if (!created) {
+      cerr << "could not add caps: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_CAPS_RM:
+    removed = user.caps->remove(req, err_msg);
+    if (!removed) {
+      cerr << "could not add remove caps: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
+  case OPT_KEY_CREATE:
+    created = user.keys->add(req, err_msg);
+    if (!created) {
+      cerr << "could not create key: " << err_msg << std::endl;
+      return 1;
+    }
+
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
+    break;
   case OPT_KEY_RM:
-    {
-      map<string, RGWAccessKey> *keys_map;
-      if (key_type == KEY_TYPE_SWIFT) {
-        access_key = info.user_id;
-        access_key.append(":");
-        access_key.append(subuser);
-        keys_map = &info.swift_keys;
-      } else {
-        keys_map = &info.access_keys;
-      }
-      kiter = keys_map->find(access_key);
-      if (kiter == keys_map->end()) {
-        cerr << "key not found" << std::endl;
-      } else {
-        rgw_remove_key_index(store, kiter->second);
-        keys_map->erase(kiter);
-        if ((err = rgw_store_user_info(store, info, &old_info, false)) < 0) {
-          cerr << "error storing user info: " << cpp_strerror(-err) << std::endl;
-          break;
-        }
-      }
+    removed = user.keys->remove(req, err_msg);
+    if (!removed) {
+      cerr << "could not remove key: " << err_msg << std::endl;
+      return 1;
     }
-    show_user_info(info, formatter);
-    break;
 
-  case OPT_USER_INFO:
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
     show_user_info(info, formatter);
+
+    break;
+  case OPT_USER_INFO:
+    fetched = user.info(info, err_msg);
+    if (!fetched) {
+      cerr << "could not fetch user info: " << err_msg << std::endl;
+      return 1;
+    }
+
+    show_user_info(info, formatter);
+
     break;
   }
 
@@ -1550,29 +1336,6 @@ next:
     }
   }
   
-  if (opt_cmd == OPT_USER_RM) {
-    RGWUserBuckets buckets;
-    int ret;
-
-    if (rgw_read_user_buckets(store, user_id, buckets, false) >= 0) {
-      map<string, RGWBucketEnt>& m = buckets.get_buckets();
-
-      if (!m.empty() && purge_data) {
-        for (std::map<string, RGWBucketEnt>::iterator it = m.begin(); it != m.end(); it++) {
-          ret = remove_bucket(store, ((*it).second).bucket, true);
-
-          if (ret < 0)
-            return ret;
-        }
-      }
-
-      if (!m.empty() && !purge_data) {
-        cerr << "ERROR: specify --purge-data to remove a user with a non-empty bucket list" << std::endl;
-        return 1;
-      }
-    }
-    rgw_delete_user(store, info);
-  }
   
   if (opt_cmd == OPT_POOL_ADD) {
     if (pool_name.empty()) {
@@ -1641,46 +1404,6 @@ next:
     formatter->flush(cout);
     cout << std::endl;
   }
-
-  if (opt_cmd == OPT_USER_SUSPEND || opt_cmd == OPT_USER_ENABLE) {
-    string id;
-    __u8 disable = (opt_cmd == OPT_USER_SUSPEND ? 1 : 0);
-
-    if (user_id.empty()) {
-      cerr << "uid was not specified" << std::endl;
-      return usage();
-    }
-    RGWUserBuckets buckets;
-    if (rgw_read_user_buckets(store, user_id, buckets, false) < 0) {
-      cerr << "could not get buckets for uid " << user_id << std::endl;
-    }
-    map<string, RGWBucketEnt>& m = buckets.get_buckets();
-    map<string, RGWBucketEnt>::iterator iter;
-
-    int ret;
-    info.suspended = disable;
-    ret = rgw_store_user_info(store, info, &old_info, false);
-    if (ret < 0) {
-      cerr << "ERROR: failed to store user info user=" << user_id << " ret=" << ret << std::endl;
-      return 1;
-    }
-     
-    if (disable)
-      dout(0) << "disabling user buckets" << dendl;
-    else
-      dout(0) << "enabling user buckets" << dendl;
-
-    vector<rgw_bucket> bucket_names;
-    for (iter = m.begin(); iter != m.end(); ++iter) {
-      RGWBucketEnt obj = iter->second;
-      bucket_names.push_back(obj.bucket);
-    }
-    ret = store->set_buckets_enabled(bucket_names, !disable);
-    if (ret < 0) {
-      cerr << "ERROR: failed to change pool" << std::endl;
-      return 1;
-    }
-  } 
 
   if (opt_cmd == OPT_USAGE_SHOW) {
     uint64_t start_epoch = 0;
