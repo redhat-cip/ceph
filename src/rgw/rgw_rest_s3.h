@@ -165,6 +165,37 @@ public:
   void send_response();
 };
 
+class RGWGetCORS_ObjStore_S3 : public RGWGetCORS_ObjStore {
+public:
+  RGWGetCORS_ObjStore_S3() {}
+  ~RGWGetCORS_ObjStore_S3() {}
+
+  void send_response();
+};
+
+class RGWPutCORS_ObjStore_S3 : public RGWPutCORS_ObjStore {
+public:
+  RGWPutCORS_ObjStore_S3() {}
+  ~RGWPutCORS_ObjStore_S3() {}
+
+  void send_response();
+};
+
+class RGWDeleteCORS_ObjStore_S3 : public RGWDeleteCORS_ObjStore {
+public:
+  RGWDeleteCORS_ObjStore_S3() {}
+  ~RGWDeleteCORS_ObjStore_S3() {}
+
+  void send_response();
+};
+
+class RGWOptionsCORS_ObjStore_S3 : public RGWOptionsCORS_ObjStore {
+public:
+  RGWOptionsCORS_ObjStore_S3() {}
+  ~RGWOptionsCORS_ObjStore_S3() {}
+
+  void send_response();
+};
 
 class RGWInitMultipart_ObjStore_S3 : public RGWInitMultipart_ObjStore {
 public:
@@ -270,8 +301,11 @@ protected:
   bool is_acl_op() {
     return s->args.exists("acl");
   }
+  bool is_cors_op() {
+      return s->args.exists("cors");
+  }
   bool is_obj_update_op() {
-    return is_acl_op();
+    return is_acl_op() || is_cors_op();
   }
   RGWOp *get_obj_op(bool get_data);
 
@@ -280,6 +314,7 @@ protected:
   RGWOp *op_put();
   RGWOp *op_delete();
   RGWOp *op_post();
+  RGWOp *op_options();
 public:
   RGWHandler_ObjStore_Bucket_S3() {}
   virtual ~RGWHandler_ObjStore_Bucket_S3() {}
@@ -290,6 +325,9 @@ protected:
   bool is_acl_op() {
     return s->args.exists("acl");
   }
+  bool is_cors_op() {
+      return s->args.exists("cors");
+  }
   bool is_obj_update_op() {
     return is_acl_op();
   }
@@ -300,6 +338,7 @@ protected:
   RGWOp *op_put();
   RGWOp *op_delete();
   RGWOp *op_post();
+  RGWOp *op_options();
 public:
   RGWHandler_ObjStore_Obj_S3() {}
   virtual ~RGWHandler_ObjStore_Obj_S3() {}
