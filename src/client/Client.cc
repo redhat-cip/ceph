@@ -4266,7 +4266,7 @@ int Client::_getattr(Inode *in, int mask, int uid, int gid, bool force)
   return res;
 }
 
-int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid)
+int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid, Inode **inp)
 {
   int issued = in->caps_issued();
 
@@ -4368,7 +4368,9 @@ int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid)
   }
   req->head.args.setattr.mask = mask;
 
-  int res = make_request(req, uid, gid);
+  req->regetattr_mask = mask;
+
+  int res = make_request(req, uid, gid, inp);
   ldout(cct, 10) << "_setattr result=" << res << dendl;
   return res;
 }
@@ -6512,7 +6514,7 @@ int Client::ll_setattr(vinodeno_t vino, struct stat *attr, int mask, int uid, in
   tout(cct) << mask << std::endl;
 
   Inode *in = _ll_get_inode(vino);
-  int res = _setattr(in, attr, mask, uid, gid);
+  int res = _setattr(in, attr, mask, uid, gid, &in);
   if (res == 0)
     fill_stat(in, attr);
   ldout(cct, 3) << "ll_setattr " << vino << " = " << res << dendl;
@@ -6848,7 +6850,7 @@ int Client::ll_readlink(vinodeno_t vino, const char **value, int uid, int gid)
   return r;
 }
 
-int Client::_mknod(Inode *dir, const char *name, mode_t mode, dev_t rdev, int uid, int gid) 
+int Client::_mknod(Inode *dir, const char *name, mode_t mode, dev_t rdev, int uid, int gid, Inode **inp)
 { 
   ldout(cct, 3) << "_mknod(" << dir->ino << " " << name << ", 0" << oct << mode << dec << ", " << rdev
 	  << ", uid " << uid << ", gid " << gid << ")" << dendl;
@@ -6876,7 +6878,7 @@ int Client::_mknod(Inode *dir, const char *name, mode_t mode, dev_t rdev, int ui
   if (res < 0)
     goto fail;
 
-  res = make_request(req, uid, gid);
+  res = make_request(req, uid, gid, inp);
 
   trim_cache();
 
@@ -6899,11 +6901,9 @@ int Client::ll_mknod(vinodeno_t parent, const char *name, mode_t mode, dev_t rde
   tout(cct) << rdev << std::endl;
 
   Inode *diri = _ll_get_inode(parent);
-
-  int r = _mknod(diri, name, mode, rdev, uid, gid);
+  Inode *in = 0;
+  int r = _mknod(diri, name, mode, rdev, uid, gid, &in);
   if (r == 0) {
-    string dname(name);
-    Inode *in = diri->dir->dentries[dname]->inode;
     fill_stat(in, attr);
     _ll_get(in);
   }
@@ -6982,7 +6982,8 @@ int Client::_create(Inode *dir, const char *name, int flags, mode_t mode, Inode 
 }
 
 
-int Client::_mkdir(Inode *dir, const char *name, mode_t mode, int uid, int gid)
+int Client::_mkdir(Inode *dir, const char *name, mode_t mode, int uid, int gid,
+		   Inode **inp)
 {
   ldout(cct, 3) << "_mkdir(" << dir->ino << " " << name << ", 0" << oct << mode << dec
 	  << ", uid " << uid << ", gid " << gid << ")" << dendl;
@@ -7009,7 +7010,7 @@ int Client::_mkdir(Inode *dir, const char *name, mode_t mode, int uid, int gid)
     goto fail;
   
   ldout(cct, 10) << "_mkdir: making request" << dendl;
-  res = make_request(req, uid, gid);
+  res = make_request(req, uid, gid, inp);
   ldout(cct, 10) << "_mkdir result is " << res << dendl;
 
   trim_cache();
@@ -7033,10 +7034,9 @@ int Client::ll_mkdir(vinodeno_t parent, const char *name, mode_t mode, struct st
 
   Inode *diri = _ll_get_inode(parent);
 
-  int r = _mkdir(diri, name, mode, uid, gid);
+  Inode *in = 0;
+  int r = _mkdir(diri, name, mode, uid, gid, &in);
   if (r == 0) {
-    string dname(name);
-    Inode *in = diri->dir->dentries[dname]->inode;
     fill_stat(in, attr);
     _ll_get(in);
   }
@@ -7046,7 +7046,8 @@ int Client::ll_mkdir(vinodeno_t parent, const char *name, mode_t mode, struct st
   return r;
 }
 
-int Client::_symlink(Inode *dir, const char *name, const char *target, int uid, int gid)
+int Client::_symlink(Inode *dir, const char *name, const char *target, int uid, int gid,
+		     Inode **inp)
 {
   ldout(cct, 3) << "_symlink(" << dir->ino << " " << name << ", " << target
 	  << ", uid " << uid << ", gid " << gid << ")" << dendl;
@@ -7073,7 +7074,7 @@ int Client::_symlink(Inode *dir, const char *name, const char *target, int uid, 
   if (res < 0)
     goto fail;
 
-  res = make_request(req, uid, gid);
+  res = make_request(req, uid, gid, inp);
 
   trim_cache();
   ldout(cct, 3) << "_symlink(\"" << path << "\", \"" << target << "\") = " << res << dendl;
@@ -7095,10 +7096,9 @@ int Client::ll_symlink(vinodeno_t parent, const char *name, const char *value, s
   tout(cct) << value << std::endl;
 
   Inode *diri = _ll_get_inode(parent);
-  int r = _symlink(diri, name, value, uid, gid);
+  Inode *in = 0;
+  int r = _symlink(diri, name, value, uid, gid, &in);
   if (r == 0) {
-    string dname(name);
-    Inode *in = diri->dir->dentries[dname]->inode;
     fill_stat(in, attr);
     _ll_get(in);
   }
@@ -7294,7 +7294,7 @@ int Client::ll_rename(vinodeno_t parent, const char *name, vinodeno_t newparent,
   return _rename(fromdiri, name, todiri, newname, uid, gid);
 }
 
-int Client::_link(Inode *in, Inode *dir, const char *newname, int uid, int gid) 
+int Client::_link(Inode *in, Inode *dir, const char *newname, int uid, int gid, Inode **inp)
 {
   ldout(cct, 3) << "_link(" << in->ino << " to " << dir->ino << " " << newname
 	  << " uid " << uid << " gid " << gid << ")" << dendl;
@@ -7321,7 +7321,7 @@ int Client::_link(Inode *in, Inode *dir, const char *newname, int uid, int gid)
   if (res < 0)
     goto fail;
   
-  res = make_request(req, uid, gid);
+  res = make_request(req, uid, gid, inp);
   ldout(cct, 10) << "link result is " << res << dendl;
 
   trim_cache();
@@ -7345,7 +7345,7 @@ int Client::ll_link(vinodeno_t vino, vinodeno_t newparent, const char *newname, 
   Inode *old = _ll_get_inode(vino);
   Inode *diri = _ll_get_inode(newparent);
 
-  int r = _link(old, diri, newname, uid, gid);
+  int r = _link(old, diri, newname, uid, gid, &old);
   if (r == 0) {
     Inode *in = _ll_get_inode(vino);
     fill_stat(in, attr);
