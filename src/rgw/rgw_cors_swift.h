@@ -58,6 +58,7 @@ class RGWCORSConfiguration_SWIFT : public RGWCORSConfiguration
             return -EINVAL;
         }
       }
+
       if (expose_headers) {
         string eh = expose_headers;
         get_str_list(eh, e);
