@@ -295,6 +295,34 @@ void decode_json_obj(long& val, JSONObj *obj)
  }
 }
 
+void decode_json_obj(uint64_t& val, JSONObj *obj)
+{
+  string s = obj->get_data();
+  const char *start = s.c_str();
+  char *p;
+
+  errno = 0;
+  val = strtoull(start, &p, 10);
+
+  /* Check for various possible errors */
+
+ if ((errno == ERANGE && (val == LONG_MAX || val == LONG_MIN)) ||
+     (errno != 0 && val == 0)) {
+   throw JSONDecoder::err("failed to parse number");
+ }
+
+ if (p == start) {
+   throw JSONDecoder::err("failed to parse number");
+ }
+
+ while (*p != '\0') {
+   if (!isspace(*p)) {
+     throw JSONDecoder::err("failed to parse number");
+   }
+   p++;
+ }
+}
+
 void decode_json_obj(unsigned long& val, JSONObj *obj)
 {
   string s = obj->get_data();
@@ -402,6 +430,16 @@ void encode_json(const char *name, unsigned val, Formatter *f)
 }
 
 void encode_json(const char *name, unsigned long val, Formatter *f)
+{
+  f->dump_int(name, val);
+}
+
+void encode_json(const char *name, uint64_t val, Formatter *f)
+{
+  f->dump_unsigned(name, val);
+}
+
+void encode_json(const char *name, long long val, Formatter *f)
 {
   f->dump_int(name, val);
 }

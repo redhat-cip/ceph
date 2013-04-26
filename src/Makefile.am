@@ -387,6 +387,7 @@ radosgw_SOURCES = \
         rgw/rgw_rest_swift.cc \
         rgw/rgw_rest_s3.cc \
         rgw/rgw_rest_usage.cc \
+        rgw/rgw_rest_metadata.cc \
         rgw/rgw_http_client.cc \
         rgw/rgw_swift.cc \
 	rgw/rgw_swift_auth.cc \
@@ -880,6 +881,13 @@ unittest_texttable_LDFLAGS = $(PTHREAD_CFLAGS) ${AM_LDFLAGS}
 unittest_texttable_LDADD = librados.la ${UNITTEST_LDADD}
 unittest_texttable_CXXFLAGS = ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
 check_PROGRAMS += unittest_texttable
+
+unittest_rgw_meta_SOURCES = test/test_rgw_admin_meta.cc
+unittest_rgw_meta_LDFLAGS = libglobal.la 
+unittest_rgw_meta_LDADD = librgw.a ${UNITTEST_LDADD} ${UNITTEST_STATIC_LDADD} -lcryptopp -lcurl -luuid -lexpat  librados.la libcls_version_client.a \
+ libcls_log_client.a libcls_refcount_client.a libcls_rgw_client.a libcls_lock_client.a
+unittest_rgw_meta_CXXFLAGS = ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
+check_PROGRAMS += unittest_rgw_meta
 
 ceph_test_librbd_SOURCES = test/librbd/test_librbd.cc test/librados/test.cc
 ceph_test_librbd_LDADD =  librbd.la librados.la ${UNITTEST_STATIC_LDADD}
@@ -1999,6 +2007,7 @@ noinst_HEADERS = \
 	rgw/rgw_rest_s3.h\
 	rgw/rgw_rest_admin.h\
 	rgw/rgw_rest_usage.h\
+  rgw/rgw_rest_metadata.h\
 	rgw/rgw_tools.h\
 	rgw/rgw_usage.h\
 	rgw/rgw_user.h\

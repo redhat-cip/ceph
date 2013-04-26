@@ -234,6 +234,7 @@ static int get_cmd(const char *cmd, const char *prev_cmd, bool *need_more)
       strcmp(cmd, "zone") == 0 ||
       strcmp(cmd, "temp") == 0 ||
       strcmp(cmd, "metadata") == 0 ||
+      strcmp(cmd, "user") == 0 ||
       strcmp(cmd, "mdlog") == 0) {
     *need_more = true;
     return 0;
