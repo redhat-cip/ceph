@@ -494,7 +494,7 @@ void encode_json(const char *name, const utime_t& val, Formatter *f)
 void encode_json(const char *name, const bufferlist& bl, Formatter *f)
 {
   /* need to copy data from bl, as it is const bufferlist */
-  bufferptr src = bl;
+  bufferlist src = bl;
 
   bufferlist b64;
   src.encode_base64(b64);

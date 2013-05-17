@@ -759,6 +759,7 @@ static int bi_log_iterate_entries(cls_method_context_t hctx, const string& marke
     key.append(marker);
 
     start_key = key;
+    start_key[start_key.length() - 1] -= 1;
   } else {
     start_key = key_iter;
   }
@@ -793,7 +794,7 @@ static int bi_log_iterate_entries(cls_method_context_t hctx, const string& marke
 
       CLS_LOG(0, "bi_log_iterate_entries key=%s bl.length=%d\n", key.c_str(), (int)iter->second.length());
 
-      if (key.compare(end_key) >= 0)
+      if (key.compare(end_key) > 0)
         return 0;
 
       ret = bi_log_record_decode(iter->second, e);

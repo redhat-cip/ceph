@@ -373,7 +373,7 @@ int RGWMetadataManager::remove(string& metadata_key)
   ::encode(log_data, logbl);
 
   string section, key;
-  parse_metadata_key(entry, section, key);
+  parse_metadata_key(metadata_key, section, key);
 
   ret = md_log->add_entry(store, section, key, logbl);
   if (ret < 0)
