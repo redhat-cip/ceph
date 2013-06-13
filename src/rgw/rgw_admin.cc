@@ -1764,7 +1764,7 @@ next:
 
     RGWMetadataLog *meta_log = store->meta_mgr->get_log();
 
-    meta_log->init_list_entries(shard_id, start_time, end_time, &handle);
+    meta_log->init_list_entries(shard_id, start_time, end_time, marker, &handle);
 
     bool truncated;
 
