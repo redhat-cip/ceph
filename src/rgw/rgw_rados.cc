@@ -1187,7 +1187,8 @@ int RGWRados::time_log_trim(const string& oid, utime_t& start_time, utime_t& end
 }
 
 
-int RGWRados::lock_exclusive(rgw_bucket& pool, const string& oid, utime_t& duration, string& owner_id) {
+int RGWRados::lock_exclusive(rgw_bucket& pool, const string& oid, utime_t& duration, 
+                             string& zone_id, string& owner_id) {
   librados::IoCtx io_ctx;
 
   const char *pool_name = pool.name.c_str();
@@ -1199,11 +1200,13 @@ int RGWRados::lock_exclusive(rgw_bucket& pool, const string& oid, utime_t& durat
   rados::cls::lock::Lock l(log_lock_name);
   l.set_duration(duration);
   l.set_cookie(owner_id);
+  l.set_tag(zone_id);
+  l.set_renew(true);
   
   return l.lock_exclusive(&io_ctx, oid);
 }
 
-int RGWRados::unlock(rgw_bucket& pool, const string& oid, string& owner_id) {
+int RGWRados::unlock(rgw_bucket& pool, const string& oid, string& zone_id, string& owner_id) {
   librados::IoCtx io_ctx;
 
   const char *pool_name = pool.name.c_str();
@@ -1213,6 +1216,7 @@ int RGWRados::unlock(rgw_bucket& pool, const string& oid, string& owner_id) {
     return r;
   
   rados::cls::lock::Lock l(log_lock_name);
+  l.set_tag(zone_id);
   l.set_cookie(owner_id);
   
   return l.unlock(&io_ctx, oid);
