@@ -161,19 +161,19 @@ void RGWOp_MDLog_Delete::execute() {
 }
 
 void RGWOp_MDLog_Lock::execute() {
-  string shard_id_str, duration_str, lock_id, zone_id;
+  string shard_id_str, duration_str, locker_id, zone_id;
   unsigned shard_id;
 
   http_ret = 0;
 
   shard_id_str = s->args.get("id");
   duration_str = s->args.get("length");
-  lock_id      = s->args.get("locker-id");
+  locker_id      = s->args.get("locker-id");
   zone_id      = s->args.get("zone-id");
 
   if (shard_id_str.empty() ||
       (duration_str.empty()) ||
-      lock_id.empty() ||
+      locker_id.empty() ||
       zone_id.empty()) {
     dout(5) << "Error invalid parameter list" << dendl;
     http_ret = -EINVAL;
@@ -197,21 +197,21 @@ void RGWOp_MDLog_Lock::execute() {
     return;
   }
   utime_t time(dur, 0);
-  http_ret = meta_log->lock_exclusive(shard_id, time, zone_id, lock_id);
+  http_ret = meta_log->lock_exclusive(shard_id, time, zone_id, locker_id);
 }
 
 void RGWOp_MDLog_Unlock::execute() {
-  string shard_id_str, lock_id, zone_id;
+  string shard_id_str, locker_id, zone_id;
   unsigned shard_id;
 
   http_ret = 0;
 
   shard_id_str = s->args.get("id");
-  lock_id      = s->args.get("locker-id");
+  locker_id      = s->args.get("locker-id");
   zone_id      = s->args.get("zone-id");
 
   if (shard_id_str.empty() ||
-      lock_id.empty() ||
+      locker_id.empty() ||
       zone_id.empty()) {
     dout(5) << "Error invalid parameter list" << dendl;
     http_ret = -EINVAL;
@@ -227,7 +227,7 @@ void RGWOp_MDLog_Unlock::execute() {
   }
 
   RGWMetadataLog *meta_log = store->meta_mgr->get_log();
-  http_ret = meta_log->unlock(shard_id, zone_id, lock_id);
+  http_ret = meta_log->unlock(shard_id, zone_id, locker_id);
 }
 
 void RGWOp_BILog_List::execute() {
@@ -420,19 +420,19 @@ void RGWOp_DATALog_GetShardsInfo::send_response() {
 }
 
 void RGWOp_DATALog_Lock::execute() {
-  string shard_id_str, duration_str, lock_id, zone_id;
+  string shard_id_str, duration_str, locker_id, zone_id;
   unsigned shard_id;
 
   http_ret = 0;
 
   shard_id_str = s->args.get("id");
   duration_str = s->args.get("length");
-  lock_id      = s->args.get("locker-id");
+  locker_id      = s->args.get("locker-id");
   zone_id      = s->args.get("zone-id");
 
   if (shard_id_str.empty() ||
       (duration_str.empty()) ||
-      lock_id.empty() ||
+      locker_id.empty() ||
       zone_id.empty()) {
     dout(5) << "Error invalid parameter list" << dendl;
     http_ret = -EINVAL;
@@ -455,21 +455,21 @@ void RGWOp_DATALog_Lock::execute() {
     return;
   }
   utime_t time(dur, 0);
-  http_ret = store->data_log->lock_exclusive(shard_id, time, zone_id, lock_id);
+  http_ret = store->data_log->lock_exclusive(shard_id, time, zone_id, locker_id);
 }
 
 void RGWOp_DATALog_Unlock::execute() {
-  string shard_id_str, lock_id, zone_id;
+  string shard_id_str, locker_id, zone_id;
   unsigned shard_id;
 
   http_ret = 0;
 
   shard_id_str = s->args.get("id");
-  lock_id      = s->args.get("locker-id");
+  locker_id      = s->args.get("locker-id");
   zone_id      = s->args.get("zone-id");
 
   if (shard_id_str.empty() ||
-      lock_id.empty() ||
+      locker_id.empty() ||
       zone_id.empty()) {
     dout(5) << "Error invalid parameter list" << dendl;
     http_ret = -EINVAL;
@@ -484,7 +484,7 @@ void RGWOp_DATALog_Unlock::execute() {
     return;
   }
 
-  http_ret = store->data_log->unlock(shard_id, zone_id, lock_id);
+  http_ret = store->data_log->unlock(shard_id, zone_id, locker_id);
 }
 
 void RGWOp_DATALog_Delete::execute() {
