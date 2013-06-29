@@ -87,11 +87,10 @@ static int get_input_list(req_state *s, const char *element_name, list<pair<stri
   
   if ((rv = parse_input_list(data, data_len, element_name, out)) < 0) {
     dout(5) << "Error parsing input list - " << rv << dendl;
-    return rv;
   }
 
   free(data);
-  return 0;
+  return rv;
 }
 
 static void item_encode_json(const char *name, 
