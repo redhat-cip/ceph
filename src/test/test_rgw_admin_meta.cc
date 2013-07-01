@@ -841,7 +841,7 @@ TEST(TestRGWAdmin, meta_lock_unlock) {
 
   rest_req = "/admin/metadata/user?key="CEPH_UID"&lock&length=3&lock_id=ceph";
   g_test->send_request(string("POST"), rest_req, read_dummy_post, NULL, sizeof(int));
-  EXPECT_EQ(409U, g_test->get_resp_code()); 
+  EXPECT_EQ(200U, g_test->get_resp_code()); 
   sleep_time.sleep();
 
   rest_req = "/admin/metadata/user?key="CEPH_UID"&lock&length=3&lock_id=ceph1";

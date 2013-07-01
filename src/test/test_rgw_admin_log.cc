@@ -706,9 +706,9 @@ static int get_datalog_list(list<rgw_data_change> &entries) {
 }
 
 unsigned get_mdlog_shard_id(string& key, int max_shards) {
-  string section = "user";
-  uint32_t val = ceph_str_hash_linux(key.c_str(), key.size());
-  val ^= ceph_str_hash_linux(section.c_str(), section.size());
+  string section = "user:";
+  section.append(key);
+  uint32_t val = ceph_str_hash_linux(section.c_str(), section.size());
   return (unsigned)(val % max_shards);
 }
 
@@ -759,7 +759,7 @@ TEST(TestRGWAdmin, datalog_list) {
   if (entries.size() == 1) {
     rgw_data_change entry = *(entries.begin());
     EXPECT_EQ(entry.entity_type, ENTITY_TYPE_BUCKET);
-    EXPECT_EQ(entry.key.compare(TEST_BUCKET_NAME), 0);
+    EXPECT_EQ(entry.key.compare(0, strlen(TEST_BUCKET_NAME), TEST_BUCKET_NAME), 0);
   }
   ASSERT_EQ(0, delete_obj(TEST_BUCKET_OBJECT));
   sleep(1);
@@ -775,7 +775,7 @@ TEST(TestRGWAdmin, datalog_list) {
   if (entries.size() == 1) {
     list<rgw_data_change>::iterator it = (entries.begin());
     EXPECT_EQ((*it).entity_type, ENTITY_TYPE_BUCKET);
-    EXPECT_EQ((*it).key.compare(TEST_BUCKET_NAME), 0);
+    EXPECT_EQ((*it).key.compare(0, strlen(TEST_BUCKET_NAME), TEST_BUCKET_NAME), 0);
   }
 
   sleep(1);
@@ -792,10 +792,10 @@ TEST(TestRGWAdmin, datalog_list) {
   if (entries.size() == 2) {
     list<rgw_data_change>::iterator it = (entries.begin());
     EXPECT_EQ((*it).entity_type, ENTITY_TYPE_BUCKET);
-    EXPECT_EQ((*it).key.compare(TEST_BUCKET_NAME), 0);
+    EXPECT_EQ((*it).key.compare(0, strlen(TEST_BUCKET_NAME), TEST_BUCKET_NAME), 0);
     it++; 
     EXPECT_EQ((*it).entity_type, ENTITY_TYPE_BUCKET);
-    EXPECT_EQ((*it).key.compare(TEST_BUCKET_NAME), 0);
+    EXPECT_EQ((*it).key.compare(0, strlen(TEST_BUCKET_NAME), TEST_BUCKET_NAME), 0);
   }
 
   ss.str("");
