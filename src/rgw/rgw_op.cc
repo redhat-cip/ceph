@@ -370,9 +370,11 @@ static int rgw_build_policies(RGWRados *store, struct req_state *s, bool only_bu
       /* we now need to make sure that the operation actually requires copy source, that is
        * it's a copy operation
        */
-      if (!s->local_source ||
+      /*If the operation is delete and if this is the master, it has to be done here*/
+      if ((s->op != OP_DELETE || !store->region.is_master) &&
+          (!s->local_source ||
           (s->op != OP_PUT && s->op != OP_COPY) ||
-          s->object_str.empty()) {
+          s->object_str.empty())) {
         return -ERR_PERMANENT_REDIRECT;
       }
     }

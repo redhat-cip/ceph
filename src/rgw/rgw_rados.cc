@@ -2580,7 +2580,6 @@ set_err_state:
   if (remote_dest) {
     /* dest is in a different region, copy it there */
 
-    map<string, bufferlist> src_attrs;
     string etag;
 
     RGWRESTStreamWriteRequest *out_stream_req;

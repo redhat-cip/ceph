@@ -68,6 +68,7 @@ int RGWHTTPClient::process(const char *method, const char *url)
     h = curl_slist_append(h, val.c_str());
   }
 
+  curl_slist_append(h, "Expect:");
   curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, method);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
@@ -156,6 +157,7 @@ int RGWHTTPClient::init_async(const char *method, const char *url, void **handle
 
   req_data->h = h;
 
+  curl_slist_append(h, "Expect:");
   curl_easy_setopt(easy_handle, CURLOPT_CUSTOMREQUEST, method);
   curl_easy_setopt(easy_handle, CURLOPT_URL, url);
   curl_easy_setopt(easy_handle, CURLOPT_NOPROGRESS, 1L);
