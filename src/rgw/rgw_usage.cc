@@ -136,5 +136,21 @@ int RGWUsage::show(RGWRados *store, string& uid, uint64_t start_epoch,
 int RGWUsage::trim(RGWRados *store, string& uid, uint64_t start_epoch,
 		   uint64_t end_epoch)
 {
-  return store->trim_usage(uid, start_epoch, end_epoch);
+  uint32_t max_entries = 1000;
+  bool is_truncated = true;
+
+  RGWUsageIter usage_iter;
+  while (is_truncated) {
+    int ret = store->trim_usage(uid, start_epoch, end_epoch, max_entries, 
+                                &is_truncated, usage_iter);
+
+    if (ret == -ENOENT) {
+      is_truncated = false;
+    }
+
+    if (ret < 0) {
+      return ret;
+    }
+  }
+  return 0;
 }

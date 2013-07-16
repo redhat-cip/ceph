@@ -716,9 +716,9 @@ int RGWHandler_ObjStore_SWIFT::authorize()
   return 0;
 }
 
-int RGWHandler_ObjStore_SWIFT::validate_bucket_name(const string& bucket)
+int RGWBucketName_Validator_SWIFT::validate_bucket_name(const string& bucket)
 {
-  int ret = RGWHandler_ObjStore::validate_bucket_name(bucket);
+  int ret = RGWBucketName_Validator::validate_bucket_name(bucket);
   if (ret < 0)
     return ret;
 

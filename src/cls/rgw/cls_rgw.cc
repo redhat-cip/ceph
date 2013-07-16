@@ -1154,7 +1154,7 @@ static int usage_iterate_range(cls_method_context_t hctx, uint64_t start, uint64
 
 
       i++;
-      if (max_entries && (i > max_entries)) {
+      if (max_entries && (i == max_entries)) {
         *truncated = true;
         key_iter = key;
         return 0;
@@ -1210,6 +1210,7 @@ static int usage_log_trim_cb(cls_method_context_t hctx, const string& key, rgw_u
 {
   string key_by_time;
   string key_by_user;
+  uint32_t *num_deleted = (uint32_t *)param;
 
   usage_record_name_by_time(entry.epoch, entry.owner, entry.bucket, key_by_time);
   usage_record_name_by_user(entry.owner, entry.epoch, entry.bucket, key_by_user);
@@ -1218,7 +1219,11 @@ static int usage_log_trim_cb(cls_method_context_t hctx, const string& key, rgw_u
   if (ret < 0)
     return ret;
 
-  return cls_cxx_map_remove_key(hctx, key_by_user);
+  ret = cls_cxx_map_remove_key(hctx, key_by_user);
+  if (ret == 0)
+    ++*num_deleted;
+
+  return ret;
 }
 
 int rgw_user_usage_log_trim(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
@@ -1240,11 +1245,21 @@ int rgw_user_usage_log_trim(cls_method_context_t hctx, bufferlist *in, bufferlis
     return -EINVAL;
   }
 
-  string iter;
-  ret = usage_iterate_range(hctx, op.start_epoch, op.end_epoch, op.user, iter, 0, NULL, usage_log_trim_cb, NULL);
+  rgw_cls_usage_log_trim_ret ret_info;
+  string iter = op.marker;
+  uint32_t num_deleted = 0;
+#define MAX_ENTRIES 1000
+  uint32_t max_entries = (op.max_entries ? op.max_entries : MAX_ENTRIES);
+  ret = usage_iterate_range(hctx, op.start_epoch, op.end_epoch, op.user, iter, max_entries, 
+                            &ret_info.truncated, usage_log_trim_cb, &num_deleted);
   if (ret < 0)
     return ret;
 
+  ret_info.num_deleted = num_deleted;
+  if (ret_info.truncated)
+    ret_info.next_marker = iter;
+
+  ::encode(ret_info, *out);
   return 0;
 }
 

@@ -1407,25 +1407,35 @@ next:
   return 0;
 }
 
-int RGWRados::trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch)
+int RGWRados::trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
+                         bool *is_truncated, RGWUsageIter& usage_iter)
 {
-  uint32_t index = 0;
+  uint32_t num = max_entries, num_deleted;
   string hash, first_hash;
-  usage_log_hash(cct, user, first_hash, index);
+  usage_log_hash(cct, user, first_hash, 0);
 
-  hash = first_hash;
+  if (usage_iter.index) {
+    usage_log_hash(cct, user, hash, usage_iter.index);
+  } else {
+    hash = first_hash;
+  }
 
   do {
-    int ret =  cls_obj_usage_log_trim(hash, user, start_epoch, end_epoch);
+    int ret =  cls_obj_usage_log_trim(hash, user, start_epoch, end_epoch, num,
+                                      usage_iter.read_iter, is_truncated, &num_deleted);
     if (ret == -ENOENT)
       goto next;
 
     if (ret < 0)
       return ret;
 
+    num -= num_deleted;
 next:
-    usage_log_hash(cct, user, hash, ++index);
-  } while (hash != first_hash);
+    if (!*is_truncated) {
+      usage_iter.read_iter.clear();
+      usage_log_hash(cct, user, hash, ++usage_iter.index);
+    }
+  } while (num && !*is_truncated && hash != first_hash);
 
   return 0;
 }
@@ -5148,19 +5158,22 @@ int RGWRados::cls_obj_usage_log_read(string& oid, string& user, uint64_t start_e
   return r;
 }
 
-int RGWRados::cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch)
+int RGWRados::cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch,
+                                     uint32_t max_entries, string& marker, bool *is_truncated, 
+                                     uint32_t *num_deleted)
 {
   librados::IoCtx io_ctx;
+
+  *is_truncated = false;
 
   const char *usage_log_pool = zone.usage_log_pool.name.c_str();
   int r = rados->ioctx_create(usage_log_pool, io_ctx);
   if (r < 0)
     return r;
 
-  ObjectWriteOperation op;
-  cls_rgw_usage_log_trim(op, user, start_epoch, end_epoch);
+  r = cls_rgw_usage_log_trim(io_ctx, oid, user, start_epoch, end_epoch, 
+                             max_entries, marker, is_truncated, num_deleted);
 
-  r = io_ctx.operate(oid, &op);
   return r;
 }
 

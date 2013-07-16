@@ -278,15 +278,19 @@ public:
   }
 };
 
-class RGWHandler_ObjStore_S3 : public RGWHandler_ObjStore {
+class RGWBucketName_Validator_S3 : public RGWBucketName_Validator {
+public:
+  RGWBucketName_Validator_S3() {}
+  int validate_bucket_name(const string& bucket, bool relaxed_names);
+};
+
+class RGWHandler_ObjStore_S3 : public RGWHandler_ObjStore, public RGWBucketName_Validator_S3{
   friend class RGWRESTMgr_S3;
 public:
   static int init_from_header(struct req_state *s, int default_formatter, bool configurable_format);
 
   RGWHandler_ObjStore_S3() : RGWHandler_ObjStore() {}
   virtual ~RGWHandler_ObjStore_S3() {}
-
-  int validate_bucket_name(const string& bucket, bool relaxed_names);
 
   virtual int init(RGWRados *store, struct req_state *state, RGWClientIO *cio);
   virtual int authorize() {

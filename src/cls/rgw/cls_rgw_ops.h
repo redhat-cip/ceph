@@ -271,13 +271,17 @@ WRITE_CLASS_ENCODER(rgw_cls_usage_log_read_ret)
 struct rgw_cls_usage_log_trim_op {
   uint64_t start_epoch;
   uint64_t end_epoch;
+  uint32_t max_entries;
   string user;
+  string marker;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(2, 2, bl);
     ::encode(start_epoch, bl);
     ::encode(end_epoch, bl);
+    ::encode(max_entries, bl);
     ::encode(user, bl);
+    ::encode(marker, bl);
     ENCODE_FINISH(bl);
   }
 
@@ -285,11 +289,36 @@ struct rgw_cls_usage_log_trim_op {
     DECODE_START(2, bl);
     ::decode(start_epoch, bl);
     ::decode(end_epoch, bl);
+    ::decode(max_entries, bl);
     ::decode(user, bl);
+    ::decode(marker, bl);
     DECODE_FINISH(bl);
   }
 };
 WRITE_CLASS_ENCODER(rgw_cls_usage_log_trim_op)
+
+struct rgw_cls_usage_log_trim_ret {
+  bool truncated;
+  uint32_t num_deleted;
+  string next_marker;
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(truncated, bl);
+    ::encode(num_deleted, bl);
+    ::encode(next_marker, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(truncated, bl);
+    ::decode(num_deleted, bl);
+    ::decode(next_marker, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(rgw_cls_usage_log_trim_ret)
 
 struct cls_rgw_gc_set_entry_op {
   uint32_t expiration_secs;
