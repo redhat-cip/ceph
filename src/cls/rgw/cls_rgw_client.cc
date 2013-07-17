@@ -242,16 +242,34 @@ int cls_rgw_usage_log_read(IoCtx& io_ctx, string& oid, string& user,
   return 0;
 }
 
-void cls_rgw_usage_log_trim(ObjectWriteOperation& op, string& user,
-                           uint64_t start_epoch, uint64_t end_epoch)
+int cls_rgw_usage_log_trim(IoCtx& io_ctx, string&oid, string& user,
+                           uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
+                           string& marker, bool *is_truncated, uint32_t *num_deleted)
 {
-  bufferlist in;
+  bufferlist in, out;
   rgw_cls_usage_log_trim_op call;
   call.start_epoch = start_epoch;
   call.end_epoch = end_epoch;
   call.user = user;
+  call.max_entries = max_entries;
   ::encode(call, in);
-  op.exec("rgw", "user_usage_log_trim", in);
+  int r = io_ctx.exec(oid, "rgw", "user_usage_log_trim", in, out);
+  if (r < 0)
+    return r;
+  
+  try {
+    rgw_cls_usage_log_trim_ret result;
+    bufferlist::iterator iter = out.begin();
+    ::decode(result, iter);
+    marker = result.next_marker;
+    *num_deleted = result.num_deleted;
+    if (is_truncated)
+      *is_truncated = result.truncated;
+
+  } catch (buffer::error& e) {
+    return -EINVAL;
+  }
+  return 0;
 }
 
 void cls_rgw_usage_log_add(ObjectWriteOperation& op, rgw_usage_log_info& info)
