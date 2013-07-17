@@ -668,6 +668,7 @@ OPTION(rgw_exit_timeout_secs, OPT_INT, 120) // how many seconds to wait for proc
 OPTION(rgw_get_obj_window_size, OPT_INT, 16 << 20) // window size in bytes for single get obj request
 OPTION(rgw_get_obj_max_req_size, OPT_INT, 4 << 20) // max length of a single get obj rados op
 OPTION(rgw_relaxed_s3_bucket_names, OPT_BOOL, false) // enable relaxed bucket name rules for US region buckets
+OPTION(rgw_strict_s3_list_buckets, OPT_BOOL, true) //do not list non-conformant s3 names (swift bucket names) in S3 rest api
 OPTION(rgw_list_buckets_max_chunk, OPT_INT, 1000) // max buckets to retrieve in a single op when listing user buckets
 OPTION(rgw_md_log_max_shards, OPT_INT, 64) // max shards for metadata log
 OPTION(rgw_num_zone_opstate_shards, OPT_INT, 128) // max shards for keeping inter-region copy progress info

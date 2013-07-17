@@ -208,11 +208,12 @@ void RGWListBuckets_ObjStore_S3::send_response_data(RGWUserBuckets& buckets)
 
   RGWBucketName_Validator_S3 v;
   bool relaxed_names = s->cct->_conf->rgw_relaxed_s3_bucket_names;
+  bool strict = s->cct->_conf->rgw_strict_s3_list_buckets;
 
   for (iter = m.begin(); iter != m.end(); ++iter) {
     RGWBucketEnt obj = iter->second;
 
-    if (v.validate_bucket_name(obj.bucket.name, relaxed_names) == 0)
+    if (!strict || (v.validate_bucket_name(obj.bucket.name, relaxed_names) == 0))
       dump_bucket(s, obj);
   }
   rgw_flush_formatter(s, s->formatter);
