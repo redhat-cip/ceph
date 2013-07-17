@@ -133,7 +133,13 @@ public:
   void send_response();
 };
 
-class RGWHandler_ObjStore_SWIFT : public RGWHandler_ObjStore {
+class RGWBucketName_Validator_SWIFT : RGWBucketName_Validator {
+public:
+  RGWBucketName_Validator_SWIFT() {}
+  int validate_bucket_name(const string& bucket);
+};
+
+class RGWHandler_ObjStore_SWIFT : public RGWHandler_ObjStore, public RGWBucketName_Validator_SWIFT{
   friend class RGWRESTMgr_SWIFT;
 protected:
   virtual bool is_acl_op() {
@@ -144,8 +150,6 @@ protected:
 public:
   RGWHandler_ObjStore_SWIFT() {}
   virtual ~RGWHandler_ObjStore_SWIFT() {}
-
-  int validate_bucket_name(const string& bucket);
 
   int init(RGWRados *store, struct req_state *state, RGWClientIO *cio);
   int authorize();

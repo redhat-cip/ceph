@@ -237,7 +237,14 @@ public:
   virtual int verify_permission();
 };
 
-class RGWHandler_ObjStore : public RGWHandler {
+class RGWBucketName_Validator {
+  public:
+  RGWBucketName_Validator() {}
+  virtual int validate_bucket_name(const string& bucket);
+  virtual ~RGWBucketName_Validator() {}
+};
+
+class RGWHandler_ObjStore : public RGWHandler { 
 protected:
   virtual bool is_obj_update_op() { return false; }
   virtual RGWOp *op_get() { return NULL; }
@@ -248,7 +255,6 @@ protected:
   virtual RGWOp *op_copy() { return NULL; }
   virtual RGWOp *op_options() { return NULL; }
 
-  virtual int validate_bucket_name(const string& bucket);
   virtual int validate_object_name(const string& object);
 
   static int allocate_formatter(struct req_state *s, int default_formatter, bool configurable);

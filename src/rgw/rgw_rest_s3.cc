@@ -206,9 +206,14 @@ void RGWListBuckets_ObjStore_S3::send_response_data(RGWUserBuckets& buckets)
   map<string, RGWBucketEnt>& m = buckets.get_buckets();
   map<string, RGWBucketEnt>::iterator iter;
 
+  RGWBucketName_Validator_S3 v;
+  bool relaxed_names = s->cct->_conf->rgw_relaxed_s3_bucket_names;
+
   for (iter = m.begin(); iter != m.end(); ++iter) {
     RGWBucketEnt obj = iter->second;
-    dump_bucket(s, obj);
+
+    if (v.validate_bucket_name(obj.bucket.name, relaxed_names) == 0)
+      dump_bucket(s, obj);
   }
   rgw_flush_formatter(s, s->formatter);
 }
@@ -1874,9 +1879,9 @@ static bool looks_like_ip_address(const char *bucket)
   return (num_periods == 3);
 }
 
-int RGWHandler_ObjStore_S3::validate_bucket_name(const string& bucket, bool relaxed_names)
+int RGWBucketName_Validator_S3::validate_bucket_name(const string& bucket, bool relaxed_names)
 {
-  int ret = RGWHandler_ObjStore::validate_bucket_name(bucket);
+  int ret = RGWBucketName_Validator::validate_bucket_name(bucket);
   if (ret < 0)
     return ret;
 
