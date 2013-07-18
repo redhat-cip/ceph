@@ -45,8 +45,7 @@ int cls_rgw_usage_log_read(librados::IoCtx& io_ctx, string& oid, string& user,
                            bool *is_truncated);
 
 int cls_rgw_usage_log_trim(librados::IoCtx& io_ctx, string& user, string& oid,
-                           uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
-                           string& marker, bool *is_truncated, uint32_t *num_deleted);
+                           uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries);
 
 void cls_rgw_usage_log_add(librados::ObjectWriteOperation& op, rgw_usage_log_info& info);
 

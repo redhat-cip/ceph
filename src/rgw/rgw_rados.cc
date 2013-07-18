@@ -1405,35 +1405,37 @@ next:
   return 0;
 }
 
-int RGWRados::trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
-                         bool *is_truncated, RGWUsageIter& usage_iter)
+int RGWRados::trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries)
 {
-  uint32_t num = max_entries, num_deleted;
+  uint32_t index = 0;
   string hash, first_hash;
-  usage_log_hash(cct, user, first_hash, 0);
 
-  if (usage_iter.index) {
-    usage_log_hash(cct, user, hash, usage_iter.index);
-  } else {
-    hash = first_hash;
-  }
+  usage_log_hash(cct, user, first_hash, index);
 
+  hash = first_hash;
+
+#define MAX_ENTRIES (1000)
+  if (!max_entries)
+    max_entries = MAX_ENTRIES;
+
+  uint32_t num = max_entries;
   do {
-    int ret =  cls_obj_usage_log_trim(hash, user, start_epoch, end_epoch, num,
-                                      usage_iter.read_iter, is_truncated, &num_deleted);
+    if (max_entries > MAX_ENTRIES)
+      num = MAX_ENTRIES;
+    else 
+      num = max_entries;
+
+    int ret =  cls_obj_usage_log_trim(hash, user, start_epoch, end_epoch, num);
     if (ret == -ENOENT)
       goto next;
 
     if (ret < 0)
       return ret;
 
-    num -= num_deleted;
+    max_entries -= num;
 next:
-    if (!*is_truncated) {
-      usage_iter.read_iter.clear();
-      usage_log_hash(cct, user, hash, ++usage_iter.index);
-    }
-  } while (num && !*is_truncated && hash != first_hash);
+    usage_log_hash(cct, user, hash, ++index);
+  } while (num && hash != first_hash);
 
   return 0;
 }
@@ -5202,23 +5204,17 @@ int RGWRados::cls_obj_usage_log_read(string& oid, string& user, uint64_t start_e
   return r;
 }
 
-int RGWRados::cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch,
-                                     uint32_t max_entries, string& marker, bool *is_truncated, 
-                                     uint32_t *num_deleted)
-{
+int RGWRados::cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, 
+                                     uint64_t end_epoch, uint32_t max_entries) {
   librados::IoCtx io_ctx;
-
-  *is_truncated = false;
 
   const char *usage_log_pool = zone.usage_log_pool.name.c_str();
   int r = rados->ioctx_create(usage_log_pool, io_ctx);
   if (r < 0)
     return r;
 
-  r = cls_rgw_usage_log_trim(io_ctx, oid, user, start_epoch, end_epoch, 
-                             max_entries, marker, is_truncated, num_deleted);
-
-  return r;
+  return cls_rgw_usage_log_trim(io_ctx, oid, user, start_epoch, 
+                             end_epoch, max_entries);
 }
 
 int RGWRados::remove_objs_from_index(rgw_bucket& bucket, list<string>& oid_list)

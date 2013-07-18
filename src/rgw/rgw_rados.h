@@ -945,8 +945,7 @@ public:
   int log_usage(map<rgw_user_bucket, RGWUsageBatch>& usage_info);
   int read_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
                  bool *is_truncated, RGWUsageIter& read_iter, map<rgw_user_bucket, rgw_usage_log_entry>& usage);
-  int trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
-                 bool *is_truncated, RGWUsageIter& usage_iter);
+  int trim_usage(string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries);
 
   /**
    * get listing of the objects in a bucket.
@@ -1334,8 +1333,7 @@ public:
   int cls_obj_usage_log_add(const string& oid, rgw_usage_log_info& info);
   int cls_obj_usage_log_read(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
                              string& read_iter, map<rgw_user_bucket, rgw_usage_log_entry>& usage, bool *is_truncated);
-  int cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries,
-                             string& marker, bool *is_truncated, uint32_t *num_deleted);
+  int cls_obj_usage_log_trim(string& oid, string& user, uint64_t start_epoch, uint64_t end_epoch, uint32_t max_entries);
 
   void shard_name(const string& prefix, unsigned max_shards, const string& key, string& name);
   void shard_name(const string& prefix, unsigned max_shards, const string& section, const string& key, string& name);
