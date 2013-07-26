@@ -1,5 +1,7 @@
 
 #include "common/Formatter.h"
+#include "common/armor.h"
+#include "common/ceph_crypto.h"
 #include "common/utf8.h"
 #include "rgw_swift.h"
 #include "rgw_rest_swift.h"
@@ -11,6 +13,7 @@
 #include <sstream>
 
 #define dout_subsys ceph_subsys_rgw
+#define RGW_SWIFT_TEMP_URL_KEY_ID ".tempurl"
 
 int RGWListBuckets_ObjStore_SWIFT::get_params()
 {
@@ -256,6 +259,127 @@ static void dump_account_metadata(struct req_state *s, uint32_t buckets_count,
   s->cio->print("X-Account-Bytes-Used-Actual: %s\n", buf);
 }
 
+static void rgw_create_swift_temp_url_header(const char *method,
+                                             const char *expires,
+                                             const char *object,
+                                             string& out_hdr) {
+  string hdr;
+
+  hdr = method;
+  hdr.append("\n");
+
+  hdr.append(expires);
+  hdr.append("\n");
+
+  hdr.append(object);
+  hdr.append("\n");
+
+  out_hdr = hdr;
+}
+
+static int rgw_get_temp_url_digest(const string& auth_hdr, const string& key, string& digest) {
+  char hmac_sha1[CEPH_CRYPTO_HMACSHA1_DIGESTSIZE];
+  
+  calc_hmac_sha1(key.c_str(), key.size(), auth_hdr.c_str(), auth_hdr.size(), hmac_sha1);
+
+  char b64[64];
+  int ret = ceph_armor(b64, b64 + 64, hmac_sha1,
+		       hmac_sha1 + CEPH_CRYPTO_HMACSHA1_DIGESTSIZE);
+  if (ret < 0) {
+    dout(10) << "ceph_armor failed" << dendl;
+    return ret;
+  }
+  b64[ret] = '\0';
+
+  digest = b64;
+
+  return 0;
+}
+
+static int rgw_check_temp_url_digest(const char *method, string& expires, 
+                                     string& object, string& key, 
+                                     string& temp_url_sig) {
+  string auth_hdr, digest;
+  int ret;
+
+  rgw_create_swift_temp_url_header(method, expires.c_str(), 
+                                   object.c_str(), auth_hdr);
+
+  if ((ret = rgw_get_temp_url_digest(auth_hdr, key, digest)) != 0) {
+    dout(5) << "Error calculating digest" << dendl;
+    return ret;
+  }
+
+  dout(15) << "Calculated digest = " << digest << dendl;
+  dout(15) << "temp_url_sig = " << temp_url_sig << dendl;
+  dout(15) << "compare = " << temp_url_sig.compare(digest) << dendl;
+
+  if (temp_url_sig != digest) 
+    return -EPERM;
+
+  return 0;
+}
+
+static int rgw_swift_verify_temp_url(RGWRados *store, req_state *s, const char *method) {
+  string temp_url_key_id = RGW_SWIFT_TEMP_URL_KEY_ID;
+  RGWUserInfo uinfo;
+
+  int ret = rgw_get_user_info_by_uid(store, s->bucket_info.owner, uinfo);
+  if (ret < 0) {
+    dout(5) << "Error getting user info from bucket owner id" << dendl;
+    return -EPERM;
+  }
+
+  map<string, RGWAccessKey>::iterator iter = uinfo.swift_keys.find(temp_url_key_id);
+  if (iter == s->user.swift_keys.end()) {
+    return -EPERM;
+  }
+
+  string temp_url_sig = s->info.args.get("temp_url_sig");
+  if (!temp_url_sig.empty()) {
+    string expires_str = s->info.args.get("temp_url_expires"), err;
+    time_t expires;
+
+    expires = (time_t)strict_strtoll(expires_str.c_str(), 10, &err);
+    if (!err.empty()) {
+      dout(5) << "Error parsing shard_id " << expires_str << dendl;
+      return -EINVAL;
+    }
+
+    string object;
+    size_t end_off, start_off;
+
+    start_off = s->decoded_uri.find("/v1");
+    end_off = s->decoded_uri.find_first_of("?", start_off);
+    object.assign(s->decoded_uri, start_off, end_off);
+   
+    if (strcmp(method, "HEAD") == 0) {
+      if ((ret = rgw_check_temp_url_digest("GET", expires_str, object, 
+                                         iter->second.key, temp_url_sig)) < 0) {
+        if ((ret = rgw_check_temp_url_digest("PUT", expires_str, object, 
+                                         iter->second.key, temp_url_sig)) < 0) {
+          return ret;
+        }
+      }
+    } else {
+      if ((ret = rgw_check_temp_url_digest(method, expires_str, object, 
+                                         iter->second.key, temp_url_sig)) < 0)
+        return ret;
+    }
+
+    utime_t now = ceph_clock_now(store->ctx());
+    utime_t exp(expires, 0);
+
+    if (now >= exp) {
+      dout(5) << "Temp url expired" << dendl;
+      return -EACCES;
+    }
+
+    s->user = uinfo;
+  }
+  return 0;
+}
+
 void RGWStatAccount_ObjStore_SWIFT::send_response()
 {
   if (ret >= 0) {
@@ -268,6 +392,56 @@ void RGWStatAccount_ObjStore_SWIFT::send_response()
 
   end_header(s);
   dump_start(s);
+}
+
+int RGWPutAccountMetadata_ObjStore_SWIFT::verify_permission() {
+  return 0;
+}
+
+void RGWPutAccountMetadata_ObjStore_SWIFT::execute() {
+  RGWUserAdminOpState user_op;
+    
+  const char *temp_url_key = s->info.env->get("HTTP_X_ACCOUNT_META_TEMP_URL_KEY");
+  if (!temp_url_key) {
+    dout(5) << "Put account metadata called without X-Account-Meta-Temp-Url-Key" << dendl;
+    http_ret = -EINVAL;
+    return;
+  }
+
+  user_op.set_user_id(s->user.user_id);
+  user_op.set_display_name(s->user.display_name);
+  user_op.set_key_type(KEY_TYPE_SWIFT);
+
+  string access_key = RGW_SWIFT_TEMP_URL_KEY_ID;
+  user_op.set_access_key(access_key);
+
+  string secret_key = temp_url_key;
+  user_op.set_secret_key(secret_key);
+   
+  RGWUser user;
+  http_ret = user.init(store, user_op);
+  if (http_ret < 0) {
+    dout(5) << "Error initializing user_op, err " << http_ret << dendl;
+    return;
+  }
+
+  string err_msg;
+  map<string, RGWAccessKey>::iterator iter = s->user.swift_keys.find(access_key);
+
+  if (iter == s->user.swift_keys.end()) {
+    http_ret = user.add(user_op, &err_msg);
+    if (http_ret < 0) {
+      dout(5) << "Error adding key to the user, err " << err_msg << dendl;
+      return;
+    }
+  } else {
+    http_ret = user.modify(user_op, &err_msg);
+    if (http_ret < 0) {
+      dout(5) << "Error adding key to the user, err " << err_msg << dendl;
+      return;
+    }
+  }
+  http_ret = 0;
 }
 
 void RGWStatBucket_ObjStore_SWIFT::send_response()
@@ -315,6 +489,18 @@ void RGWDeleteBucket_ObjStore_SWIFT::send_response()
   rgw_flush_formatter_and_reset(s, s->formatter);
 }
 
+int RGWPutObj_ObjStore_SWIFT::verify_permission() {
+  int ret = RGWPutObj::verify_permission();
+  /*If the user is anonymous check if it's a temp-url */
+  if ((ret < 0) && 
+      (s->user.user_id.compare(RGW_USER_ANON_ID) == 0)) {
+    ret = rgw_swift_verify_temp_url(store, s, "PUT");
+    is_temp_url = true;
+  }
+
+  return ret;
+}
+
 int RGWPutObj_ObjStore_SWIFT::get_params()
 {
   if (s->has_bad_meta)
@@ -350,6 +536,20 @@ int RGWPutObj_ObjStore_SWIFT::get_params()
   obj_manifest = s->info.env->get("HTTP_X_OBJECT_MANIFEST");
 
   return RGWPutObj_ObjStore::get_params();
+}
+
+void RGWPutObj_ObjStore_SWIFT::execute() {
+  if (is_temp_url) {
+    string fname = s->info.args.get("filename");
+    if (!fname.empty()) {
+      /*Now, the object name is not what is mentioned in the url*/
+      free((void *)s->object);
+      s->object = strdup(fname.c_str());
+      s->object_str = fname;
+    }
+  }
+
+  RGWPutObj::execute();
 }
 
 void RGWPutObj_ObjStore_SWIFT::send_response()
@@ -484,6 +684,17 @@ void RGWCopyObj_ObjStore_SWIFT::send_response()
   end_header(s);
 }
 
+int RGWGetObj_ObjStore_SWIFT::verify_permission() {
+  int ret = RGWGetObj::verify_permission();
+
+  /*If the user is anonymous check if it's a temp-url */
+  if ((ret < 0) && (s->user.user_id.compare(RGW_USER_ANON_ID) == 0)) {
+    ret = rgw_swift_verify_temp_url(store, s, 
+                                    ((!this->get_data)?"HEAD":"GET"));
+  }
+  return ret;
+}
+
 int RGWGetObj_ObjStore_SWIFT::send_response_data(bufferlist& bl, off_t bl_ofs, off_t bl_len)
 {
   const char *content_type = NULL;
@@ -587,6 +798,11 @@ RGWOp *RGWHandler_ObjStore_Service_SWIFT::op_get()
 RGWOp *RGWHandler_ObjStore_Service_SWIFT::op_head()
 {
   return new RGWStatAccount_ObjStore_SWIFT;
+}
+
+RGWOp *RGWHandler_ObjStore_Service_SWIFT::op_post()
+{
+  return new RGWPutAccountMetadata_ObjStore_SWIFT;
 }
 
 RGWOp *RGWHandler_ObjStore_Bucket_SWIFT::get_obj_op(bool get_data)

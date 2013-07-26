@@ -10,6 +10,7 @@ public:
   RGWGetObj_ObjStore_SWIFT() {}
   ~RGWGetObj_ObjStore_SWIFT() {}
 
+  int verify_permission();
   int send_response_data(bufferlist& bl, off_t ofs, off_t len);
 };
 
@@ -48,6 +49,19 @@ public:
   void send_response();
 };
 
+class RGWPutAccountMetadata_ObjStore_SWIFT : public RGWRESTOp {
+public:
+  RGWPutAccountMetadata_ObjStore_SWIFT() {}
+  ~RGWPutAccountMetadata_ObjStore_SWIFT() {}
+
+  int verify_permission();
+  void execute();
+  const char *name() {
+    return "put_account_metadata";
+  }
+};
+
+
 class RGWStatBucket_ObjStore_SWIFT : public RGWStatBucket_ObjStore {
 public:
   RGWStatBucket_ObjStore_SWIFT() {}
@@ -74,10 +88,13 @@ public:
 };
 
 class RGWPutObj_ObjStore_SWIFT : public RGWPutObj_ObjStore {
+  bool is_temp_url;
 public:
-  RGWPutObj_ObjStore_SWIFT() {}
+  RGWPutObj_ObjStore_SWIFT() : is_temp_url(false) {}
   ~RGWPutObj_ObjStore_SWIFT() {}
 
+  int verify_permission();
+  void execute();
   int get_params();
   void send_response();
 };
@@ -158,6 +175,7 @@ class RGWHandler_ObjStore_Service_SWIFT : public RGWHandler_ObjStore_SWIFT {
 protected:
   RGWOp *op_get();
   RGWOp *op_head();
+  RGWOp *op_post();
 public:
   RGWHandler_ObjStore_Service_SWIFT() {}
   virtual ~RGWHandler_ObjStore_Service_SWIFT() {}

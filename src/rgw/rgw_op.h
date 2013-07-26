@@ -105,7 +105,7 @@ public:
   void set_get_data(bool get_data) {
     this->get_data = get_data;
   }
-  int verify_permission();
+  virtual int verify_permission();
   void execute();
   int read_user_manifest_part(rgw_bucket& bucket, RGWObjEnt& ent, RGWAccessControlPolicy *bucket_policy, off_t start_ofs, off_t end_ofs);
   int iterate_user_manifest_parts(rgw_bucket& bucket, string& obj_prefix, RGWAccessControlPolicy *bucket_policy,
@@ -312,8 +312,8 @@ public:
   RGWPutObjProcessor *select_processor();
   void dispose_processor(RGWPutObjProcessor *processor);
 
-  int verify_permission();
-  void execute();
+  virtual int verify_permission();
+  virtual void execute();
 
   virtual int get_params() = 0;
   virtual int get_data(bufferlist& bl) = 0;
